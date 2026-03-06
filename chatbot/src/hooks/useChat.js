@@ -18,7 +18,11 @@ export function useChat(sessionId) {
 
     socketRef.current = socket;
 
-    socket.on('connect', () => setConnected(true));
+    socket.on('connect', () => {
+      setConnected(true);
+      // Join session room so admin intercept messages are received
+      socket.emit('client:join', sessionId);
+    });
     socket.on('disconnect', () => setConnected(false));
 
     socket.on('ai:message', ({ message }) => {

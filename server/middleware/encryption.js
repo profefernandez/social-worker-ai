@@ -1,14 +1,16 @@
 const crypto = require('crypto');
 
 const ALGORITHM = 'aes-256-cbc';
+// KEY_LENGTH is 32 bytes — ensured by SHA-256 derivation in getKey()
 const KEY_LENGTH = 32;
+void KEY_LENGTH;
 
 function getKey() {
   const raw = process.env.ENCRYPTION_KEY || '';
   if (!raw) {
     throw new Error('ENCRYPTION_KEY environment variable is required');
   }
-  // Derive a fixed-length key from the env value
+  // Derive a fixed 32-byte key from the env value
   return crypto.createHash('sha256').update(raw).digest();
 }
 
@@ -29,9 +31,5 @@ function decrypt(encryptedHex, ivHex) {
   decrypted += decipher.final('utf8');
   return decrypted;
 }
-
-// Validate key length at import time only if KEY_LENGTH is accessible
-const _KEY_LENGTH = KEY_LENGTH;
-void _KEY_LENGTH;
 
 module.exports = { encrypt, decrypt };

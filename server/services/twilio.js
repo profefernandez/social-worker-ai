@@ -20,13 +20,27 @@ async function sendSms(to, body) {
 }
 
 /**
+ * Escape special XML characters to prevent TwiML injection.
+ * @param {string} text
+ * @returns {string}
+ */
+function escapeXml(text) {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+/**
  * Initiate a voice call with a TwiML message.
  * @param {string} to - Recipient phone number.
  * @param {string} messageText - Text to speak via TTS.
  */
 async function makeCall(to, messageText) {
   const client = getClient();
-  const twiml = `<Response><Say voice="alice">${messageText}</Say></Response>`;
+  const twiml = `<Response><Say voice="alice">${escapeXml(messageText)}</Say></Response>`;
   const call = await client.calls.create({
     twiml,
     from: process.env.TWILIO_PHONE_NUMBER,

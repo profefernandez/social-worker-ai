@@ -39,6 +39,13 @@ function setupSocketHandlers(io) {
       });
     }
 
+    // Chatbot clients join their session room on connect so they receive admin messages
+    if (socket.userType === 'client') {
+      socket.on('client:join', (sessionId) => {
+        if (sessionId) socket.join(`session:${sessionId}`);
+      });
+    }
+
     // Chatbot client sends a message
     socket.on('client:message', async (data) => {
       const { sessionId, message } = data;
