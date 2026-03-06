@@ -1,0 +1,15 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg-primary: #0f1115;
+  --bg-card: #1a1d24;
+  --accent: #fee104;
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, sans-serif;
+  background: transparent;
+}
