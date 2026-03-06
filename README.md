@@ -80,7 +80,10 @@ docker-compose up -d
 Add this snippet to any therapist website:
 
 ```html
-<script src="https://your-domain.com/widget.js" data-session-id="<session-id>"></script>
+<script>
+  window.__CHATBOT_SESSION_ID__ = "<session-id>";
+</script>
+<script src="https://your-domain.com/widget.js"></script>
 ```
 
 ## Security
