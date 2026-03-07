@@ -2,6 +2,7 @@ import { useState } from 'react';
 import LoginPage from './pages/LoginPage';
 import MonitorPage from './pages/MonitorPage';
 import CrisisView from './pages/CrisisView';
+import CrisisWorkspace from './components/CrisisWorkspace';
 import AuditPage from './pages/AuditPage';
 import NotificationsPage from './pages/NotificationsPage';
 import Sidebar from './components/Sidebar';
@@ -21,7 +22,7 @@ export default function App() {
   const [page, setPage] = useState('monitor');
   const [selectedSession, setSelectedSession] = useState(null);
 
-  const { connected, crisisSessions, subscribeSession, sendIntercept } = useDashboard(token);
+  const { connected, crisisSessions, agentOutputs, crisisMessages, jasonActive, subscribeSession, sendIntercept, takeover, endCrisis } = useDashboard(token);
 
   function handleLogin(tok, usr) {
     setToken(tok);
@@ -71,11 +72,16 @@ export default function App() {
           <MonitorPage token={token} onSelectSession={handleSelectSession} />
         )}
         {page === 'crisis' && selectedSession && (
-          <CrisisView
+          <CrisisWorkspace
             session={selectedSession}
             token={token}
+            messages={crisisMessages[selectedSession.id || selectedSession.sessionId] || []}
+            agentOutputs={agentOutputs.filter((o) => o.sessionId === (selectedSession.id || selectedSession.sessionId))}
             sendIntercept={sendIntercept}
+            onTakeover={() => takeover(selectedSession.id || selectedSession.sessionId)}
+            onEndCrisis={() => endCrisis(selectedSession.id || selectedSession.sessionId)}
             onBack={() => setPage('monitor')}
+            isJasonActive={jasonActive[selectedSession.id || selectedSession.sessionId] || false}
           />
         )}
         {page === 'audit' && <AuditPage token={token} />}
