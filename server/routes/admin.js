@@ -105,4 +105,53 @@ router.get('/notifications', authenticateAdmin, async (req, res) => {
   }
 });
 
+// POST /api/admin/sessions/:sessionId/end-crisis — end crisis protocol (admin only)
+router.post('/sessions/:sessionId/end-crisis', authenticateAdmin, async (req, res) => {
+  const { sessionId } = req.params;
+  if (!validateUUID(sessionId)) {
+    return res.status(400).json({ error: 'Invalid session ID' });
+  }
+
+  try {
+    const [rows] = await pool.execute(
+      'SELECT * FROM sessions WHERE id = ? AND crisis_active = 1',
+      [sessionId]
+    );
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'Active crisis session not found' });
+    }
+
+    // End crisis
+    await pool.execute(
+      'UPDATE sessions SET crisis_active = 0, active_agent_id = NULL WHERE id = ?',
+      [sessionId]
+    );
+
+    // Audit
+    await pool.execute(
+      'INSERT INTO audit_log (session_id, actor, action, detail) VALUES (?, ?, ?, ?)',
+      [sessionId, req.user.email, 'crisis_ended', 'Crisis protocol ended by admin']
+    );
+
+    // Notify via WebSocket
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`session:${sessionId}`).emit('crisis:ended', {
+        sessionId,
+        endedBy: req.user.email,
+        timestamp: new Date().toISOString(),
+      });
+      io.to('dashboard').emit('crisis:ended', {
+        sessionId,
+        endedBy: req.user.email,
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    return res.json({ success: true, message: 'Crisis protocol ended' });
+  } catch {
+    return res.status(500).json({ error: 'Failed to end crisis' });
+  }
+});
+
 module.exports = router;

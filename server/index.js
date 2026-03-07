@@ -27,6 +27,7 @@ const io = new Server(server, {
     methods: ['GET', 'POST'],
   },
 });
+app.set('io', io);
 
 // Security headers (relax CSP for the widget embed use-case)
 app.use(

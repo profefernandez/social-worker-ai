@@ -212,6 +212,54 @@ function setupSocketHandlers(io) {
       }
     });
 
+    // Jason takes over the conversation from Social Worker AI
+    socket.on('admin:takeover', async ({ sessionId }) => {
+      if (socket.userType !== 'admin') return;
+      if (!sessionId || !validateUUID(sessionId)) return;
+
+      try {
+        const [rows] = await pool.execute(
+          'SELECT * FROM sessions WHERE id = ? AND crisis_active = 1',
+          [sessionId]
+        );
+        if (rows.length === 0) return;
+
+        // Set active agent to ADMIN — stops AI from responding
+        await pool.execute(
+          'UPDATE sessions SET active_agent_id = ? WHERE id = ?',
+          ['ADMIN', sessionId]
+        );
+
+        // Audit
+        await pool.execute(
+          'INSERT INTO audit_log (session_id, actor, action, detail) VALUES (?, ?, ?, ?)',
+          [sessionId, socket.user.email, 'admin_takeover', 'Jason entered the conversation']
+        );
+
+        // Notify chatbot + dashboard
+        io.to(`session:${sessionId}`).emit('agent:joined', {
+          sessionId,
+          agentName: 'Jason Fernandez, LMSW',
+        });
+
+        // Notify audit agent
+        callAgent(AGENT_ROLES.AUDIT, `ADMIN TAKEOVER. Jason Fernandez entered session ${sessionId} at ${new Date().toISOString()}.`)
+          .then((result) => {
+            io.to('dashboard').emit('agent:output', {
+              sessionId,
+              agentRole: 'audit',
+              content: result.response || 'Admin takeover logged.',
+              timestamp: new Date().toISOString(),
+            });
+          })
+          .catch((err) => console.error('Audit agent failed on takeover:', err.message));
+
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('admin:takeover error:', err.message);
+      }
+    });
+
     socket.on('disconnect', () => {
       // eslint-disable-next-line no-console
       console.log(`Socket disconnected: ${socket.id}`);
