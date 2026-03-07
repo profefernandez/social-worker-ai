@@ -1,7 +1,7 @@
 const { pool } = require('../config/db');
 const { encrypt } = require('../middleware/encryption');
 const { detectCrisis } = require('../services/crisis');
-const { runAssistant } = require('../services/lemonade');
+const { callAgent, AGENT_ROLES } = require('../services/agentOrchestrator');
 const { sendSms, makeCall } = require('../services/twilio');
 const { sendCrisisEmail } = require('../services/sendgrid');
 const { verifySocketToken } = require('../middleware/auth');
@@ -113,17 +113,30 @@ function setupSocketHandlers(io) {
           await activateCrisisProtocol(session, sessionId, message, triggers, therapist, io);
         }
 
-        // 6. Send to Launch Lemonade AI
-        let aiResponse = '';
-        try {
-          const lemonadeApiKey = therapist ? therapist.lemonade_api_key : null;
-          const result = await runAssistant(
-            message,
-            session.lemonade_conversation_id,
-            lemonadeApiKey
-          );
+        // 6. Determine which agent should respond
+        const activeRole = session.active_agent_id
+          ? (session.active_agent_id === process.env.LEMONADE_AGENT_SOCIAL_WORKER_ID
+              ? AGENT_ROLES.SOCIAL_WORKER
+              : AGENT_ROLES.CHATBOT)
+          : AGENT_ROLES.CHATBOT;
 
-          // Update conversation ID if new
+        // If Jason has taken over (active_agent_id === 'ADMIN'), don't send to any AI
+        if (session.active_agent_id === 'ADMIN') {
+          // Just save the message, no AI response — Jason responds manually
+          // Still notify dashboard of activity
+          io.to('dashboard').emit('session:update', {
+            sessionId,
+            crisisActive: isCrisis || !!session.crisis_active,
+          });
+          return;
+        }
+
+        let aiResponse = '';
+        let senderType = activeRole === AGENT_ROLES.SOCIAL_WORKER ? 'social_worker_ai' : 'ai';
+
+        try {
+          const result = await callAgent(activeRole, message, session.lemonade_conversation_id);
+
           if (!session.lemonade_conversation_id && result.conversationId) {
             await pool.execute(
               'UPDATE sessions SET lemonade_conversation_id = ? WHERE id = ?',
@@ -131,22 +144,20 @@ function setupSocketHandlers(io) {
             );
           }
 
-          aiResponse = result.responseId
-            ? `Response received (ID: ${result.responseId})`
-            : "I'm here to support you. Can you tell me more?";
+          aiResponse = result.response || "I'm here to support you. Can you tell me more?";
         } catch {
           aiResponse = "I'm here to support you. Can you tell me more?";
         }
 
-        // 7. Save AI response
+        // 7. Save AI response with correct sender type
         const aiEnc = encrypt(aiResponse);
         await pool.execute(
           'INSERT INTO messages (session_id, sender, content_encrypted, iv) VALUES (?, ?, ?, ?)',
-          [sessionId, 'ai', aiEnc.encrypted, aiEnc.iv]
+          [sessionId, senderType, aiEnc.encrypted, aiEnc.iv]
         );
 
         // 8. Emit AI response directly back to the chatbot client
-        socket.emit('ai:message', { sessionId, message: aiResponse });
+        socket.emit('ai:message', { sessionId, message: aiResponse, sender: senderType });
 
         // 9. Notify dashboard of session activity (no plaintext content — dashboard polls messages)
         io.to('dashboard').emit('session:update', {
