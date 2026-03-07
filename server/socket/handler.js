@@ -2,6 +2,7 @@ const { pool } = require('../config/db');
 const { encrypt } = require('../middleware/encryption');
 const { parseCrisisSignal } = require('../services/crisis');
 const { callAgent, AGENT_ROLES } = require('../services/agentOrchestrator');
+const { proxyToProvider } = require('../services/aiProxy');
 const { sendSms, makeCall } = require('../services/twilio');
 const { sendCrisisEmail } = require('../services/sendgrid');
 const { verifySocketToken } = require('../middleware/auth');
@@ -140,25 +141,44 @@ function setupSocketHandlers(io) {
           return;
         }
 
-        // 6. Normal mode: send to Regular Chatbot AND Social Worker AI (silent monitor) in parallel
+        // 6. Normal mode: send to Company's AI AND Social Worker AI (silent monitor) in parallel
+        const useProxy = !!process.env.OPENAI_API_KEY;
+
+        const chatbotCall = useProxy
+          ? proxyToProvider(message, [], {
+              provider: 'openai',
+              apiKey: process.env.OPENAI_API_KEY,
+              model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+              systemPrompt: process.env.OPENAI_SYSTEM_PROMPT || '',
+            })
+          : callAgent(AGENT_ROLES.CHATBOT, message, session.lemonade_conversation_id);
+
         const [chatbotResult, monitorResult] = await Promise.allSettled([
-          callAgent(AGENT_ROLES.CHATBOT, message, session.lemonade_conversation_id),
+          chatbotCall,
           callAgent(AGENT_ROLES.SOCIAL_WORKER, message),
         ]);
 
         // 7. Process chatbot response — this is what the user sees
         let aiResponse = '';
         if (chatbotResult.status === 'fulfilled') {
-          const result = chatbotResult.value;
-          if (!session.lemonade_conversation_id && result.conversationId) {
-            await pool.execute(
-              'UPDATE sessions SET lemonade_conversation_id = ? WHERE id = ?',
-              [result.conversationId, sessionId]
-            );
+          if (useProxy) {
+            // Proxy mode — response is a string directly
+            aiResponse = chatbotResult.value || "I'm here to help. What would you like to work on?";
+          } else {
+            // Lemonade mode — response is an object
+            const result = chatbotResult.value;
+            if (!session.lemonade_conversation_id && result.conversationId) {
+              await pool.execute(
+                'UPDATE sessions SET lemonade_conversation_id = ? WHERE id = ?',
+                [result.conversationId, sessionId]
+              );
+            }
+            aiResponse = result.response || "I'm here to support you. Can you tell me more?";
           }
-          aiResponse = result.response || "I'm here to support you. Can you tell me more?";
         } else {
-          aiResponse = "I'm here to support you. Can you tell me more?";
+          aiResponse = useProxy
+            ? "I'm here to help. What would you like to work on?"
+            : "I'm here to support you. Can you tell me more?";
         }
 
         // 8. Check Social Worker AI monitoring response for crisis signal
