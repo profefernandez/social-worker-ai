@@ -1,4 +1,4 @@
-# soicalworkerai
+# social-worker-ai
 AI - Human Crisis Monitoring Platform
 
 ## Overview
