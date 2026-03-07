@@ -17,13 +17,30 @@ function MessageBubble({ sender, content, index }) {
   }, [index]);
 
   const styles = {
-    client:
-      'ml-12 bg-gradient-to-br from-ember-primary/20 to-ember-secondary/10 border border-ember-primary/20 text-ember-text',
+    client: 'ml-12 bg-gradient-to-br from-ember-primary/20 to-ember-secondary/10 border border-ember-primary/20 text-ember-text',
     ai: 'mr-12 frost-panel text-ember-text',
-    admin: 'mr-12 frost-panel border border-ember-secondary/40 text-ember-text',
+    social_worker_ai: 'mr-12 frost-panel border border-ember-secondary/40 text-ember-text bg-ember-secondary/5',
+    admin: 'mr-12 frost-panel border border-ember-primary/40 text-ember-text bg-ember-primary/5',
+    system: 'mx-auto text-center max-w-xs',
   };
 
-  const labels = { client: null, ai: 'AI Assistant', admin: 'Social Worker AI' };
+  const labels = {
+    client: null,
+    ai: 'AI Assistant',
+    social_worker_ai: 'Social Worker AI',
+    admin: 'Jason Fernandez, LMSW',
+    system: null,
+  };
+
+  if (sender === 'system') {
+    return (
+      <div ref={ref} className="py-2">
+        <div className="frost-panel rounded-full px-4 py-1.5 text-[11px] font-mono text-ember-muted mx-auto w-fit border border-ember-text/10">
+          {content}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div ref={ref} className={`rounded-xl px-4 py-3 text-sm leading-relaxed ${styles[sender] || styles.ai}`}>

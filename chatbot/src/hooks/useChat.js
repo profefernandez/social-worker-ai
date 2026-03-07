@@ -25,10 +25,10 @@ export function useChat(sessionId) {
     });
     socket.on('disconnect', () => setConnected(false));
 
-    socket.on('ai:message', ({ message }) => {
+    socket.on('ai:message', ({ message, sender }) => {
       setMessages((prev) => [
         ...prev,
-        { id: Date.now(), sender: 'ai', content: message },
+        { id: Date.now(), sender: sender || 'ai', content: message },
       ]);
     });
 
@@ -37,6 +37,22 @@ export function useChat(sessionId) {
         ...prev,
         { id: Date.now(), sender: 'admin', content: message },
       ]);
+    });
+
+    socket.on('agent:joined', ({ agentName }) => {
+      setMessages((prev) => [
+        ...prev,
+        { id: Date.now(), sender: 'system', content: `${agentName} has joined the conversation` },
+      ]);
+      setCrisisActive(true);
+    });
+
+    socket.on('crisis:ended', () => {
+      setMessages((prev) => [
+        ...prev,
+        { id: Date.now(), sender: 'system', content: 'Crisis protocol has ended' },
+      ]);
+      setCrisisActive(false);
     });
 
     socket.on('session:update', ({ crisisActive: isActive }) => {
