@@ -221,13 +221,14 @@ function setupSocketHandlers(io) {
 
 async function activateCrisisProtocol(session, sessionId, triggerMessage, triggers, therapist, io) {
   try {
-    // Mark session as crisis-active
+    // 1. Mark session crisis-active and switch to Social Worker AI
+    const socialWorkerId = process.env.LEMONADE_AGENT_SOCIAL_WORKER_ID;
     await pool.execute(
-      'UPDATE sessions SET crisis_active = 1, crisis_activated_at = NOW() WHERE id = ?',
-      [sessionId]
+      'UPDATE sessions SET crisis_active = 1, crisis_activated_at = NOW(), active_agent_id = ? WHERE id = ?',
+      [socialWorkerId, sessionId]
     );
 
-    // Audit log — record trigger keywords only, not full user message
+    // 2. Audit log
     await pool.execute(
       'INSERT INTO audit_log (session_id, actor, action, detail) VALUES (?, ?, ?, ?)',
       [sessionId, 'system', 'crisis_activated', `Triggers: ${triggers.join(', ')}`]
@@ -235,55 +236,133 @@ async function activateCrisisProtocol(session, sessionId, triggerMessage, trigge
 
     const summary = `Crisis detected in session ${sessionId}. Keywords: ${triggers.join(', ')}.`;
 
-    // Notify via Twilio SMS
-    const monitoringPhone = process.env.TWILIO_MONITOR_PHONE || process.env.TWILIO_PHONE_NUMBER;
-    if (monitoringPhone && process.env.TWILIO_ACCOUNT_SID) {
-      try {
-        const smsSid = await sendSms(
-          monitoringPhone,
-          `[CRISIS ALERT] Session ${sessionId} — ${summary}`
-        );
-        await pool.execute(
-          'INSERT INTO notifications (session_id, type, recipient, status) VALUES (?, ?, ?, ?)',
-          [sessionId, 'sms', monitoringPhone, smsSid ? 'sent' : 'failed']
-        );
-
-        const callSid = await makeCall(
-          monitoringPhone,
-          `Crisis alert. A user needs immediate assistance. Please check the dashboard now.`
-        );
-        await pool.execute(
-          'INSERT INTO notifications (session_id, type, recipient, status) VALUES (?, ?, ?, ?)',
-          [sessionId, 'call', monitoringPhone, callSid ? 'sent' : 'failed']
-        );
-      } catch (err) {
-        // eslint-disable-next-line no-console
-        console.error('Twilio notification failed:', err.message);
-      }
-    }
-
-    // Notify via SendGrid email
-    const monitoringEmail = process.env.SENDGRID_MONITOR_EMAIL || process.env.SENDGRID_FROM_EMAIL;
-    if (monitoringEmail && process.env.SENDGRID_API_KEY) {
-      try {
-        await sendCrisisEmail(monitoringEmail, sessionId, summary);
-        await pool.execute(
-          'INSERT INTO notifications (session_id, type, recipient, status) VALUES (?, ?, ?, ?)',
-          [sessionId, 'email', monitoringEmail, 'sent']
-        );
-      } catch (err) {
-        // eslint-disable-next-line no-console
-        console.error('SendGrid notification failed:', err.message);
-      }
-    }
-
-    // Broadcast crisis activation only to authenticated dashboard users
+    // 3. Emit agent:joined to chatbot + dashboard
+    io.to(`session:${sessionId}`).emit('agent:joined', {
+      sessionId,
+      agentName: 'Social Worker AI',
+    });
     io.to('dashboard').emit('crisis:activated', {
       sessionId,
       therapistEmail: therapist ? therapist.email : null,
       summary,
       timestamp: new Date().toISOString(),
     });
+
+    // 4. Fire all parallel actions — agents + notifications
+    const parallelActions = [];
+
+    // Social Worker AI responds to the user
+    parallelActions.push(
+      callAgent(AGENT_ROLES.SOCIAL_WORKER, triggerMessage, session.lemonade_conversation_id)
+        .then(async (result) => {
+          const response = result.response || 'I hear you, and I want you to know you are not alone. I am here with you right now.';
+          const enc = encrypt(response);
+          await pool.execute(
+            'INSERT INTO messages (session_id, sender, content_encrypted, iv) VALUES (?, ?, ?, ?)',
+            [sessionId, 'social_worker_ai', enc.encrypted, enc.iv]
+          );
+          io.to(`session:${sessionId}`).emit('ai:message', {
+            sessionId,
+            message: response,
+            sender: 'social_worker_ai',
+          });
+          if (result.conversationId && !session.lemonade_conversation_id) {
+            await pool.execute(
+              'UPDATE sessions SET lemonade_conversation_id = ? WHERE id = ?',
+              [result.conversationId, sessionId]
+            );
+          }
+        })
+        .catch((err) => console.error('Social Worker AI agent failed:', err.message))
+    );
+
+    // Search Agent — find the user
+    parallelActions.push(
+      callAgent(AGENT_ROLES.SEARCH, `Crisis in session ${sessionId}. Client identifier: ${session.client_identifier || 'unknown'}. Find any available information about this user.`)
+        .then((result) => {
+          io.to('dashboard').emit('agent:output', {
+            sessionId,
+            agentRole: 'search',
+            content: result.response || 'Searching for user information...',
+            timestamp: new Date().toISOString(),
+          });
+        })
+        .catch((err) => console.error('Search agent failed:', err.message))
+    );
+
+    // Comms Agent — notify Jason + company owner
+    parallelActions.push(
+      callAgent(AGENT_ROLES.COMMS, `CRISIS ACTIVATED. Session: ${sessionId}. ${summary}. Therapist: ${therapist ? therapist.email : 'unknown'}. Notify all parties.`)
+        .then((result) => {
+          io.to('dashboard').emit('agent:output', {
+            sessionId,
+            agentRole: 'comms',
+            content: result.response || 'Notifications dispatched.',
+            timestamp: new Date().toISOString(),
+          });
+        })
+        .catch((err) => console.error('Comms agent failed:', err.message))
+    );
+
+    // Audit Agent — log the crisis activation
+    parallelActions.push(
+      callAgent(AGENT_ROLES.AUDIT, `CRISIS ACTIVATED. Session: ${sessionId}. Triggers: ${triggers.join(', ')}. Time: ${new Date().toISOString()}. Log this event.`)
+        .then((result) => {
+          io.to('dashboard').emit('agent:output', {
+            sessionId,
+            agentRole: 'audit',
+            content: result.response || 'Crisis activation logged.',
+            timestamp: new Date().toISOString(),
+          });
+        })
+        .catch((err) => console.error('Audit agent failed:', err.message))
+    );
+
+    // Twilio SMS
+    const monitoringPhone = process.env.TWILIO_MONITOR_PHONE || process.env.TWILIO_PHONE_NUMBER;
+    if (monitoringPhone && process.env.TWILIO_ACCOUNT_SID) {
+      parallelActions.push(
+        sendSms(monitoringPhone, `[CRISIS ALERT] ${summary}`)
+          .then(async (smsSid) => {
+            await pool.execute(
+              'INSERT INTO notifications (session_id, type, recipient, status) VALUES (?, ?, ?, ?)',
+              [sessionId, 'sms', monitoringPhone, smsSid ? 'sent' : 'failed']
+            );
+          })
+          .catch((err) => console.error('Twilio SMS failed:', err.message))
+      );
+
+      // Twilio voice call
+      parallelActions.push(
+        makeCall(monitoringPhone, 'Crisis alert. A user needs immediate assistance. Check the dashboard now.')
+          .then(async (callSid) => {
+            await pool.execute(
+              'INSERT INTO notifications (session_id, type, recipient, status) VALUES (?, ?, ?, ?)',
+              [sessionId, 'call', monitoringPhone, callSid ? 'sent' : 'failed']
+            );
+          })
+          .catch((err) => console.error('Twilio call failed:', err.message))
+      );
+    }
+
+    // SendGrid email
+    const monitoringEmail = process.env.SENDGRID_MONITOR_EMAIL || process.env.SENDGRID_FROM_EMAIL;
+    if (monitoringEmail && process.env.SENDGRID_API_KEY) {
+      parallelActions.push(
+        sendCrisisEmail(monitoringEmail, sessionId, summary)
+          .then(async () => {
+            await pool.execute(
+              'INSERT INTO notifications (session_id, type, recipient, status) VALUES (?, ?, ?, ?)',
+              [sessionId, 'email', monitoringEmail, 'sent']
+            );
+          })
+          .catch((err) => console.error('SendGrid failed:', err.message))
+      );
+    }
+
+    // Fire all in parallel — don't let any single failure stop the rest
+    await Promise.allSettled(parallelActions);
+
   } catch (err) {
     // eslint-disable-next-line no-console
     console.error('Crisis protocol activation failed:', err.message);
