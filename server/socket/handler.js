@@ -5,6 +5,7 @@ const { callAgent, AGENT_ROLES } = require('../services/agentOrchestrator');
 const { proxyToProvider } = require('../services/aiProxy');
 const { sendSms, makeCall } = require('../services/twilio');
 const { sendCrisisEmail } = require('../services/sendgrid');
+const { handleProfeCalls } = require('../services/profeHandler');
 const { verifySocketToken } = require('../middleware/auth');
 const { validateUUID, validateMessageLength } = require('../middleware/validation');
 
@@ -12,6 +13,8 @@ const { validateUUID, validateMessageLength } = require('../middleware/validatio
 // are broadcast only to authorized users.
 
 const PROFE_COMMAND = '@profe';
+const KIDDO_AGENT_ID = process.env.MISTRAL_KIDDO_AGENT_ID || 'ag_019ccbc6615476aab923e1753beee83f';
+const PROFE_AGENT_ID = process.env.MISTRAL_AGENT_ID || 'ag_019ccb3989f970d1a478a8265009287a';
 
 /**
  * Load recent conversation history from DB for the proxy provider.
@@ -88,7 +91,20 @@ function setupSocketHandlers(io) {
             'SELECT id FROM sessions WHERE id = ?',
             [sessionId]
           );
-          if (rows.length === 0) return; // unknown session — reject silently
+
+          if (rows.length === 0) {
+            // Demo mode: auto-create session
+            if (process.env.DEMO_MODE === 'true') {
+              const demoUserId = parseInt(process.env.DEMO_USER_ID, 10) || 1;
+              await pool.execute(
+                'INSERT INTO sessions (id, user_id, client_identifier) VALUES (?, ?, ?)',
+                [sessionId, demoUserId, 'demo-judge']
+              );
+            } else {
+              return; // unknown session — reject silently
+            }
+          }
+
           socket.join(`session:${sessionId}`);
         } catch (err) {
           // eslint-disable-next-line no-console
@@ -160,61 +176,102 @@ function setupSocketHandlers(io) {
           return;
         }
 
-        // 6. Check for @profe command — route directly to Social Worker AI (inquiry mode)
+        // 6. Check for @profe command — route directly to Profe Mistral agent
         const isProfeCommand = message.toLowerCase().includes(PROFE_COMMAND);
         if (isProfeCommand) {
+          const mistralKey = process.env.MISTRAL_API_KEY;
           let profeResponse = '';
-          try {
-            const result = await callAgent(AGENT_ROLES.SOCIAL_WORKER, message, session.lemonade_conversation_id);
-            if (!session.lemonade_conversation_id && result.conversationId) {
-              await pool.execute(
-                'UPDATE sessions SET lemonade_conversation_id = ? WHERE id = ?',
-                [result.conversationId, sessionId]
-              );
+
+          if (mistralKey) {
+            try {
+              const history = await loadConversationHistory(sessionId);
+              profeResponse = await proxyToProvider(message, history, {
+                provider: 'mistral',
+                apiKey: mistralKey,
+                agentId: PROFE_AGENT_ID,
+              });
+            } catch (err) {
+              console.error('@profe Mistral call failed:', err.message);
+              profeResponse = "Hey, I'm Profe! I'm here to help you understand AI better. What's on your mind?";
             }
-            profeResponse = result.response || "Hey, I'm Profe! I'm here to help you understand AI better. What's on your mind?";
-          } catch {
-            profeResponse = "Hey, I'm Profe! I'm here to help you understand AI better. What's on your mind?";
+          } else {
+            // Fallback to Lemonade if no Mistral key
+            try {
+              const result = await callAgent(AGENT_ROLES.SOCIAL_WORKER, message, session.lemonade_conversation_id);
+              if (!session.lemonade_conversation_id && result.conversationId) {
+                await pool.execute(
+                  'UPDATE sessions SET lemonade_conversation_id = ? WHERE id = ?',
+                  [result.conversationId, sessionId]
+                );
+              }
+              profeResponse = result.response || "Hey, I'm Profe! I'm here to help you understand AI better. What's on your mind?";
+            } catch {
+              profeResponse = "Hey, I'm Profe! I'm here to help you understand AI better. What's on your mind?";
+            }
           }
 
           const profeEnc = encrypt(profeResponse);
           await pool.execute(
-            'INSERT INTO messages (session_id, sender, content_encrypted, iv) VALUES (?, ?, ?, ?)',
-            [sessionId, 'social_worker_ai', profeEnc.encrypted, profeEnc.iv]
+            'INSERT INTO messages (session_id, sender, sender_type, content_encrypted, iv) VALUES (?, ?, ?, ?, ?)',
+            [sessionId, 'profe', 'profe', profeEnc.encrypted, profeEnc.iv]
           );
           socket.emit('ai:message', { sessionId, message: profeResponse, sender: 'social_worker_ai' });
           io.to('dashboard').emit('session:update', { sessionId, crisisActive: false });
           return;
         }
 
-        // 7. Normal mode: send to Company's AI AND Social Worker AI (silent monitor) in parallel
-        const proxyProvider = process.env.AI_PROVIDER || (process.env.OPENAI_API_KEY ? 'openai' : process.env.MISTRAL_API_KEY ? 'mistral' : null);
-        const proxyApiKey = proxyProvider === 'mistral' ? process.env.MISTRAL_API_KEY : process.env.OPENAI_API_KEY;
-        const useProxy = !!proxyApiKey;
-        const conversationHistory = useProxy ? await loadConversationHistory(sessionId) : [];
+        // 7. Normal mode: send to Kiddo AI AND Profe (silent monitor) in parallel
+        const mistralKey = process.env.MISTRAL_API_KEY;
+        const useMistral = !!mistralKey;
 
-        const chatbotCall = useProxy
-          ? proxyToProvider(message, conversationHistory, {
-              provider: proxyProvider,
-              apiKey: proxyApiKey,
-              model: process.env.AI_MODEL || (proxyProvider === 'mistral' ? 'mistral-small-latest' : 'gpt-4o-mini'),
-              systemPrompt: process.env.AI_SYSTEM_PROMPT || process.env.OPENAI_SYSTEM_PROMPT || '',
-            })
-          : callAgent(AGENT_ROLES.CHATBOT, message, session.lemonade_conversation_id);
+        let chatbotCall;
+        let profeCall;
 
-        const [chatbotResult, monitorResult] = await Promise.allSettled([
-          chatbotCall,
-          callAgent(AGENT_ROLES.SOCIAL_WORKER, message),
-        ]);
+        if (useMistral) {
+          const history = await loadConversationHistory(sessionId);
+
+          // Kiddo chatbot agent — text response
+          chatbotCall = proxyToProvider(message, history, {
+            provider: 'mistral',
+            apiKey: mistralKey,
+            agentId: KIDDO_AGENT_ID,
+          });
+
+          // Profe monitor — function call response
+          profeCall = proxyToProvider(message, history, {
+            provider: 'mistral',
+            apiKey: mistralKey,
+            agentId: PROFE_AGENT_ID,
+            returnFullResponse: true,
+          });
+        } else {
+          // Fallback: OpenAI proxy or Lemonade
+          const proxyProvider = process.env.AI_PROVIDER || (process.env.OPENAI_API_KEY ? 'openai' : null);
+          const proxyApiKey = process.env.OPENAI_API_KEY;
+          const useProxy = !!proxyApiKey;
+          const conversationHistory = useProxy ? await loadConversationHistory(sessionId) : [];
+
+          chatbotCall = useProxy
+            ? proxyToProvider(message, conversationHistory, {
+                provider: proxyProvider,
+                apiKey: proxyApiKey,
+                model: process.env.AI_MODEL || 'gpt-4o-mini',
+                systemPrompt: process.env.AI_SYSTEM_PROMPT || process.env.OPENAI_SYSTEM_PROMPT || '',
+              })
+            : callAgent(AGENT_ROLES.CHATBOT, message, session.lemonade_conversation_id);
+
+          profeCall = callAgent(AGENT_ROLES.SOCIAL_WORKER, message);
+        }
+
+        const [chatbotResult, profeResult] = await Promise.allSettled([chatbotCall, profeCall]);
 
         // 8. Process chatbot response — this is what the user sees
         let aiResponse = '';
         if (chatbotResult.status === 'fulfilled') {
-          if (useProxy) {
-            // Proxy mode — response is a string directly
+          if (typeof chatbotResult.value === 'string') {
             aiResponse = chatbotResult.value || "I'm here to help. What would you like to work on?";
           } else {
-            // Lemonade mode — response is an object
+            // Lemonade mode
             const result = chatbotResult.value;
             if (!session.lemonade_conversation_id && result.conversationId) {
               await pool.execute(
@@ -225,34 +282,64 @@ function setupSocketHandlers(io) {
             aiResponse = result.response || "I'm here to support you. Can you tell me more?";
           }
         } else {
-          aiResponse = useProxy
-            ? "I'm here to help. What would you like to work on?"
-            : "I'm here to support you. Can you tell me more?";
+          aiResponse = "I'm here to help. What would you like to work on?";
         }
 
-        // 9. Check Social Worker AI monitoring response for crisis signal
+        // 9. Process Profe monitoring response
         let crisisTriggered = false;
-        if (monitorResult.status === 'fulfilled' && monitorResult.value.response) {
-          const { isCrisis } = parseCrisisSignal(monitorResult.value.response);
-          crisisTriggered = isCrisis;
+        let profeIntervened = false;
+        let interventionMessage = null;
+
+        if (profeResult.status === 'fulfilled') {
+          if (useMistral && profeResult.value?.toolCalls) {
+            // Mistral mode — process function calls
+            const profeOutcome = await handleProfeCalls(profeResult.value.toolCalls, sessionId, io);
+            profeIntervened = profeOutcome.intervention;
+            interventionMessage = profeOutcome.interventionMessage;
+          } else if (profeResult.value?.response) {
+            // Lemonade mode — check for crisis signal
+            const { isCrisis } = parseCrisisSignal(profeResult.value.response);
+            crisisTriggered = isCrisis;
+          }
         }
 
-        // 10. If crisis detected by the agent, activate protocol BEFORE sending chatbot response
+        // 10. Crisis protocol (Lemonade fallback path)
         if (crisisTriggered) {
           await activateCrisisProtocol(session, sessionId, message, therapist, io);
-          // Don't send the regular chatbot response — Social Worker AI takes over
           return;
         }
 
-        // 11. No crisis — save and emit the regular chatbot response
+        // 11. Profe intervention — replace or append to kiddo response
+        if (profeIntervened && interventionMessage) {
+          // Save Profe's intervention message
+          const profeEnc = encrypt(interventionMessage);
+          await pool.execute(
+            'INSERT INTO messages (session_id, sender, sender_type, content_encrypted, iv) VALUES (?, ?, ?, ?, ?)',
+            [sessionId, 'profe', 'profe', profeEnc.encrypted, profeEnc.iv]
+          );
+
+          // Save the kiddo response too (for the record) but don't show it
+          const aiEnc = encrypt(aiResponse);
+          await pool.execute(
+            'INSERT INTO messages (session_id, sender, sender_type, content_encrypted, iv) VALUES (?, ?, ?, ?, ?)',
+            [sessionId, 'kiddo_ai', 'kiddo_ai', aiEnc.encrypted, aiEnc.iv]
+          );
+
+          // Send Profe's message to the user instead
+          socket.emit('ai:message', { sessionId, message: interventionMessage, sender: 'social_worker_ai' });
+          io.to('dashboard').emit('session:update', { sessionId, crisisActive: false });
+          return;
+        }
+
+        // 12. No intervention — save and emit the regular kiddo response
         const aiEnc = encrypt(aiResponse);
         await pool.execute(
-          'INSERT INTO messages (session_id, sender, content_encrypted, iv) VALUES (?, ?, ?, ?)',
-          [sessionId, 'ai', aiEnc.encrypted, aiEnc.iv]
+          'INSERT INTO messages (session_id, sender, sender_type, content_encrypted, iv) VALUES (?, ?, ?, ?, ?)',
+          [sessionId, 'kiddo_ai', 'kiddo_ai', aiEnc.encrypted, aiEnc.iv]
         );
         socket.emit('ai:message', { sessionId, message: aiResponse, sender: 'ai' });
 
-        // 12. Notify dashboard of session activity
+        // 13. Notify dashboard of session activity
         io.to('dashboard').emit('session:update', {
           sessionId,
           crisisActive: false,
