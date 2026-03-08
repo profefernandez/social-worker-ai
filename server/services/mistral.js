@@ -57,7 +57,7 @@ function parseFullResponse(data) {
         : typeof argValue;
       // eslint-disable-next-line no-console
       console.error(`Failed to parse tool_call arguments for ${tc.function.name} (id=${tc.id}); arguments summary: ${argSummary}`);
-      parsedArgs = { _parseError: true, raw: tc.function.arguments };
+      parsedArgs = { _parseError: true };
     }
 
     acc.push({
@@ -87,13 +87,20 @@ async function sendMessage(input, conversationHistory = [], config = {}) {
 
   const body = formatRequest(input, conversationHistory, config);
 
-  const response = await axios.post(MISTRAL_URL, body, {
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    timeout: 30000,
-  });
+  let response;
+  try {
+    response = await axios.post(MISTRAL_URL, body, {
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      timeout: 30000,
+    });
+  } catch (err) {
+    const status = err.response?.status;
+    const detail = err.response?.data?.message || err.message;
+    throw new Error(`Mistral Conversations API request failed (status=${status}): ${detail}`);
+  }
 
   if (config.returnFullResponse) {
     return parseFullResponse(response.data);

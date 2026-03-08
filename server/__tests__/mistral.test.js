@@ -156,7 +156,7 @@ describe('mistral', () => {
       const result = parseFullResponse(data);
       expect(result.toolCalls).toHaveLength(1);
       expect(result.toolCalls[0].arguments._parseError).toBe(true);
-      expect(result.toolCalls[0].arguments.raw).toBe('{invalid json');
+      expect(result.toolCalls[0].arguments).not.toHaveProperty('raw');
       expect(consoleSpy).toHaveBeenCalledWith(
         expect.stringContaining('Failed to parse tool_call arguments')
       );
@@ -275,6 +275,17 @@ describe('mistral', () => {
       expect(callBody.inputs).toHaveLength(3);
       expect(callBody.inputs[0]).toEqual({ role: 'user', content: 'Previous message' });
       expect(callBody.inputs[2]).toEqual({ role: 'user', content: 'New message' });
+    });
+
+    test('wraps API errors with meaningful message', async () => {
+      axios.post.mockRejectedValue({
+        response: { status: 401, data: { message: 'Unauthorized' } },
+        message: 'Request failed',
+      });
+
+      await expect(
+        sendMessage('Hi', [], { apiKey: 'bad-key', agentId: 'agent-1' })
+      ).rejects.toThrow('Mistral Conversations API request failed (status=401): Unauthorized');
     });
   });
 });
