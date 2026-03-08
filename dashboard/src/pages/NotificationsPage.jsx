@@ -49,7 +49,7 @@ export default function NotificationsPage({ token }) {
             const Icon = config.icon;
             return (
               <div key={n.id} className="frost-panel rounded-lg px-4 py-3 flex items-center gap-4">
-                <span className="text-[10px] font-mono text-ember-muted whitespace-nowrap">
+                <span className="text-[13px] font-mono text-ember-muted whitespace-nowrap">
                   {new Date(n.created_at).toLocaleString()}
                 </span>
                 <code className="text-xs text-ember-primary font-mono">

@@ -59,7 +59,7 @@ export default function MonitorPage({ token, onSelectSession }) {
                 <Activity className="w-8 h-8 text-ember-safe" />
               </div>
               <p className="text-ember-muted font-body">No active sessions</p>
-              <p className="text-ember-muted/60 text-sm mt-1">
+              <p className="text-ember-subtle text-sm mt-1">
                 Sessions will appear as nodes when active
               </p>
             </div>
