@@ -66,7 +66,7 @@ ALTER TABLE notifications ADD COLUMN summary TEXT AFTER urgency;
 
 **Step 2: Verify the SQL is valid**
 
-Run: `cd /c/Users/ferna/soicalworkerai && node -e "const fs = require('fs'); const sql = fs.readFileSync('server/models/schema.sql', 'utf8'); console.log('Schema file length:', sql.length, 'bytes'); console.log('Tables defined:', (sql.match(/CREATE TABLE/gi) || []).length);"`
+Run: `cd <LOCAL_REPO_PATH> && node -e "const fs = require('fs'); const sql = fs.readFileSync('server/models/schema.sql', 'utf8'); console.log('Schema file length:', sql.length, 'bytes'); console.log('Tables defined:', (sql.match(/CREATE TABLE/gi) || []).length);"`
 
 Expected: Schema file loads, shows 6 tables (users, sessions, messages, audit_log, notifications, profe_observations).
 
@@ -207,7 +207,7 @@ test('supports different agent IDs for different calls', async () => {
 
 **Step 2: Run tests to verify they fail**
 
-Run: `cd /c/Users/ferna/soicalworkerai/server && npx jest __tests__/aiProxy.test.js --verbose`
+Run: `cd <LOCAL_REPO_PATH>/server && npx jest __tests__/aiProxy.test.js --verbose`
 
 Expected: New tests FAIL (returnFullResponse not implemented, toolCalls not parsed).
 
@@ -311,7 +311,7 @@ module.exports = { proxyToProvider, PROVIDERS };
 
 **Step 4: Run tests to verify they pass**
 
-Run: `cd /c/Users/ferna/soicalworkerai/server && npx jest __tests__/aiProxy.test.js --verbose`
+Run: `cd <LOCAL_REPO_PATH>/server && npx jest __tests__/aiProxy.test.js --verbose`
 
 Expected: ALL tests PASS.
 
@@ -523,7 +523,7 @@ describe('profeHandler', () => {
 
 **Step 2: Run tests to verify they fail**
 
-Run: `cd /c/Users/ferna/soicalworkerai/server && npx jest __tests__/profeHandler.test.js --verbose`
+Run: `cd <LOCAL_REPO_PATH>/server && npx jest __tests__/profeHandler.test.js --verbose`
 
 Expected: FAIL — module not found.
 
@@ -691,7 +691,7 @@ module.exports = { handleProfeCalls };
 
 **Step 4: Run tests to verify they pass**
 
-Run: `cd /c/Users/ferna/soicalworkerai/server && npx jest __tests__/profeHandler.test.js --verbose`
+Run: `cd <LOCAL_REPO_PATH>/server && npx jest __tests__/profeHandler.test.js --verbose`
 
 Expected: ALL tests PASS.
 
@@ -916,7 +916,7 @@ Replace everything from `// 7. Normal mode` through `// 12. Notify dashboard` wi
 
 **Step 5: Run full test suite**
 
-Run: `cd /c/Users/ferna/soicalworkerai/server && npx jest --verbose`
+Run: `cd <LOCAL_REPO_PATH>/server && npx jest --verbose`
 
 Expected: ALL tests PASS.
 
@@ -942,8 +942,8 @@ Add/update in the Mistral section of `.env.example`:
 ```env
 # Mistral (Profe agent + Kiddo chatbot via Conversations API)
 MISTRAL_API_KEY=
-MISTRAL_AGENT_ID=ag_019ccb3989f970d1a478a8265009287a
-MISTRAL_KIDDO_AGENT_ID=ag_019ccbc6615476aab923e1753beee83f
+MISTRAL_AGENT_ID=<your-profe-agent-id>
+MISTRAL_KIDDO_AGENT_ID=<your-kiddo-agent-id>
 ```
 
 **Step 2: Commit**
@@ -1050,25 +1050,25 @@ git commit -m "feat: add demo mode for judge presentation (no-auth session creat
 
 **Step 1: Run server tests**
 
-Run: `cd /c/Users/ferna/soicalworkerai/server && npx jest --verbose`
+Run: `cd <LOCAL_REPO_PATH>/server && npx jest --verbose`
 
 Expected: ALL tests pass.
 
 **Step 2: Build chatbot**
 
-Run: `cd /c/Users/ferna/soicalworkerai/chatbot && npm run build`
+Run: `cd <LOCAL_REPO_PATH>/chatbot && npm run build`
 
 Expected: Build succeeds, output in `chatbot/dist/`.
 
 **Step 3: Build dashboard**
 
-Run: `cd /c/Users/ferna/soicalworkerai/dashboard && npm run build`
+Run: `cd <LOCAL_REPO_PATH>/dashboard && npm run build`
 
 Expected: Build succeeds, output in `dashboard/dist/`.
 
 **Step 4: Test Docker build locally (optional)**
 
-Run: `cd /c/Users/ferna/soicalworkerai && docker build -t social-worker-ai .`
+Run: `cd <LOCAL_REPO_PATH> && docker build -t social-worker-ai .`
 
 Expected: Multi-stage build completes successfully.
 
@@ -1089,15 +1089,15 @@ git commit -m "fix: resolve build issues"
 **Step 1: Push all changes to GitHub**
 
 ```bash
-cd /c/Users/ferna/soicalworkerai
+cd <LOCAL_REPO_PATH>
 git push origin feat/demo-presentation-flow
 ```
 
 **Step 2: SSH into VPS and clone**
 
 ```bash
-ssh 60wattsofclaritycom@165.140.156.47
-cd /home/60wattsofclaritycom/web/prototype.60wattsofclarity.com/
+ssh <SSH_USER>@<VPS_IP>
+cd <WEB_ROOT>/
 git clone https://github.com/profefernandez/social-worker-ai.git .
 # Or if already cloned:
 git pull origin feat/demo-presentation-flow
@@ -1118,9 +1118,9 @@ ALLOWED_ORIGINS=https://prototype.60wattsofclarity.com
 
 # MySQL (SPanel)
 DB_HOST=localhost
-DB_USER=60wattsofclaritycom_profefernandez
+DB_USER=<db-username>
 DB_PASS=<your-db-password>
-DB_NAME=60wattsofclaritycom_prototype60wattsofclaritycom_profefernandez
+DB_NAME=<db-name>
 
 # Security
 JWT_SECRET=<generate-random-64-char-string>
@@ -1128,8 +1128,8 @@ ENCRYPTION_KEY=<generate-random-64-char-string>
 
 # Mistral
 MISTRAL_API_KEY=<your-mistral-key>
-MISTRAL_AGENT_ID=ag_019ccb3989f970d1a478a8265009287a
-MISTRAL_KIDDO_AGENT_ID=ag_019ccbc6615476aab923e1753beee83f
+MISTRAL_AGENT_ID=<your-profe-agent-id>
+MISTRAL_KIDDO_AGENT_ID=<your-kiddo-agent-id>
 
 # Demo mode
 DEMO_MODE=true

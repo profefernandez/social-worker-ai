@@ -161,6 +161,14 @@ function setupSocketHandlers(io) {
         // 5. Check for @profe command — route directly to Profe agent
         const isProfeCommand = message.toLowerCase().includes(PROFE_COMMAND);
         if (isProfeCommand) {
+          if (!PROFE_AGENT_ID) {
+            socket.emit('ai:message', {
+              sessionId,
+              message: "Profe is not available right now. Please check back later.",
+              sender: 'system',
+            });
+            return;
+          }
           let profeResponse = '';
           try {
             const history = await loadConversationHistory(sessionId);
@@ -299,6 +307,11 @@ function setupSocketHandlers(io) {
         const session = rows[0];
 
         if (socket.userType === 'therapist' && session.user_id !== socket.user.id) return;
+
+        // Intercept is only permitted on active crisis sessions
+        if (!session.crisis_active) {
+          return socket.emit('error', { message: 'Intercept is only permitted on crisis-active sessions' });
+        }
 
         const { encrypted, iv } = encrypt(message);
         await pool.execute(

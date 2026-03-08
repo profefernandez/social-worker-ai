@@ -1,8 +1,15 @@
 import { useState, useRef, useEffect } from 'react';
 import { gsap } from 'gsap';
-import { Send, AlertTriangle, Sparkles, Paperclip, Image, X, Bot, User, Shield } from 'lucide-react';
+import { Send, AlertTriangle, Sparkles, Bot, User, Shield } from 'lucide-react';
 import { useChat } from '../hooks/useChat';
 import SafetyBanner from './SafetyBanner';
+
+const PROFE_SENDER = {
+  align: 'left',
+  bubble: 'frost-panel border border-ember-secondary/30 bg-ember-secondary/5',
+  avatar: { bg: 'bg-ember-secondary/20 border border-ember-secondary/30', icon: Shield, color: 'text-ember-secondary' },
+  label: 'Profe',
+};
 
 const SENDER_CONFIG = {
   client: {
@@ -17,12 +24,8 @@ const SENDER_CONFIG = {
     avatar: { bg: 'ember-gradient', icon: Sparkles, color: 'text-ember-text' },
     label: 'Study Assistant',
   },
-  social_worker_ai: {
-    align: 'left',
-    bubble: 'frost-panel border border-ember-secondary/30 bg-ember-secondary/5',
-    avatar: { bg: 'bg-ember-secondary/20 border border-ember-secondary/30', icon: Shield, color: 'text-ember-secondary' },
-    label: 'Profe',
-  },
+  social_worker_ai: PROFE_SENDER,
+  profe: PROFE_SENDER,
   admin: {
     align: 'left',
     bubble: 'frost-panel border border-ember-primary/30 bg-ember-primary/5',
@@ -108,48 +111,12 @@ function TypingIndicator() {
   );
 }
 
-function FilePreview({ file, onRemove }) {
-  const isImage = file.type?.startsWith('image/');
-  const [previewUrl, setPreviewUrl] = useState(null);
-
-  useEffect(() => {
-    if (!isImage) return;
-    const url = URL.createObjectURL(file);
-    setPreviewUrl(url);
-    return () => URL.revokeObjectURL(url);
-  }, [file, isImage]);
-
-  return (
-    <div className="relative inline-flex items-center gap-2 frost-panel rounded-lg border border-ember-text/10 px-3 py-2 text-xs text-ember-muted">
-      {isImage && previewUrl ? (
-        <img
-          src={previewUrl}
-          alt={file.name}
-          className="w-10 h-10 rounded object-cover"
-        />
-      ) : (
-        <Paperclip className="w-4 h-4 text-ember-muted" />
-      )}
-      <span className="max-w-[120px] truncate">{file.name}</span>
-      <button
-        onClick={onRemove}
-        className="ml-1 text-ember-muted hover:text-ember-crisis transition-colors"
-        aria-label="Remove file"
-      >
-        <X className="w-3.5 h-3.5" />
-      </button>
-    </div>
-  );
-}
-
 export default function ChatWindow({ sessionId }) {
   const { messages, connected, crisisActive, sendMessage } = useChat(sessionId);
   const [input, setInput] = useState('');
-  const [attachedFile, setAttachedFile] = useState(null);
   const [isTyping, setIsTyping] = useState(false);
   const bottomRef = useRef(null);
   const containerRef = useRef(null);
-  const fileInputRef = useRef(null);
   const textInputRef = useRef(null);
 
   useEffect(() => {
@@ -178,23 +145,10 @@ export default function ChatWindow({ sessionId }) {
 
   const handleSend = () => {
     const trimmed = input.trim();
-    if (!trimmed && !attachedFile) return;
-    const messageText = attachedFile
-      ? `${trimmed ? trimmed + '\n' : ''}[Attached: ${attachedFile.name}]`
-      : trimmed;
-    sendMessage(messageText);
+    if (!trimmed) return;
+    sendMessage(trimmed);
     setInput('');
-    setAttachedFile(null);
     textInputRef.current?.focus();
-  };
-
-  const handleFileChange = (e) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      setAttachedFile(file);
-      textInputRef.current?.focus();
-    }
-    e.target.value = '';
   };
 
   const isConsecutive = (i) => {
@@ -290,48 +244,8 @@ export default function ChatWindow({ sessionId }) {
 
         {/* Input area */}
         <div className="border-t border-ember-text/8 px-5 py-4" style={{ background: 'rgba(42, 36, 33, 0.6)' }}>
-          {/* File preview */}
-          {attachedFile && (
-            <div className="mb-3">
-              <FilePreview file={attachedFile} onRemove={() => setAttachedFile(null)} />
-            </div>
-          )}
-
           {/* Input row */}
           <div className="flex items-end gap-2">
-            {/* Attachment buttons */}
-            <div className="flex gap-1 pb-1">
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                className="w-9 h-9 rounded-xl flex items-center justify-center text-ember-muted hover:text-ember-primary hover:bg-ember-surface transition-all"
-                aria-label="Attach file"
-                title="Attach file"
-              >
-                <Paperclip className="w-[18px] h-[18px]" />
-              </button>
-              <button
-                onClick={() => {
-                  fileInputRef.current.accept = 'image/*';
-                  fileInputRef.current?.click();
-                  fileInputRef.current.accept = '*/*';
-                }}
-                className="w-9 h-9 rounded-xl flex items-center justify-center text-ember-muted hover:text-ember-primary hover:bg-ember-surface transition-all"
-                aria-label="Upload image"
-                title="Upload image for Profe to analyze"
-              >
-                <Image className="w-[18px] h-[18px]" />
-              </button>
-            </div>
-
-            {/* Hidden file input */}
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="*/*"
-              onChange={handleFileChange}
-              className="hidden"
-            />
-
             {/* Text input */}
             <div className="flex-1 relative">
               <input
@@ -348,7 +262,7 @@ export default function ChatWindow({ sessionId }) {
             {/* Send button */}
             <button
               onClick={handleSend}
-              disabled={!input.trim() && !attachedFile}
+              disabled={!input.trim()}
               className="w-10 h-10 ember-gradient rounded-xl flex items-center justify-center text-ember-text disabled:opacity-20 transition-all ember-glow shadow-lg shadow-ember-primary/10 disabled:shadow-none"
               aria-label="Send message"
             >

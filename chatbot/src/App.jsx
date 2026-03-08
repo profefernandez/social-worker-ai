@@ -24,6 +24,7 @@ const STAGE_TO_NAV = {
 
 export default function App() {
   const [stage, setStage] = useState('problem');
+  const [parentEmail, setParentEmail] = useState(null);
 
   const handleNavigate = (label) => {
     const s = NAV_TO_STAGE[label];
@@ -42,10 +43,10 @@ export default function App() {
         <DemoIntro slide={2} onNext={() => setStage('consent')} />
       )}
       {stage === 'consent' && (
-        <ConsentGate onConsent={() => setStage('chat')} />
+        <ConsentGate onConsent={({ email }) => { setParentEmail(email); setStage('chat'); }} />
       )}
       {stage === 'chat' && (
-        <ChatWindow sessionId={SESSION_ID} />
+        <ChatWindow sessionId={SESSION_ID} parentEmail={parentEmail} />
       )}
       <DemoBreadcrumb current={STAGE_TO_NAV[stage]} onNavigate={handleNavigate} />
     </>
