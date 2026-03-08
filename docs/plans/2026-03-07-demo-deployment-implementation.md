@@ -1096,8 +1096,8 @@ git push origin feat/demo-presentation-flow
 **Step 2: SSH into VPS and clone**
 
 ```bash
-ssh 60wattsofclaritycom@165.140.156.47
-cd /home/60wattsofclaritycom/web/prototype.60wattsofclarity.com/
+ssh <user>@<your-vps-ip>
+cd /path/to/web/prototype.60wattsofclarity.com/
 git clone https://github.com/profefernandez/social-worker-ai.git .
 # Or if already cloned:
 git pull origin feat/demo-presentation-flow

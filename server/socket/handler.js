@@ -161,6 +161,14 @@ function setupSocketHandlers(io) {
         // 5. Check for @profe command — route directly to Profe agent
         const isProfeCommand = message.toLowerCase().includes(PROFE_COMMAND);
         if (isProfeCommand) {
+          if (!PROFE_AGENT_ID) {
+            socket.emit('ai:message', {
+              sessionId,
+              message: 'Profe is not available right now. Please set MISTRAL_AGENT_ID to enable Profe.',
+              sender: 'system',
+            });
+            return;
+          }
           let profeResponse = '';
           try {
             const history = await loadConversationHistory(sessionId);
@@ -282,6 +290,10 @@ function setupSocketHandlers(io) {
     });
 
     // ── Admin intercept message ──
+    // Admin (Jason) may intercept any session for educational intervention.
+    // Therapists (company owners) are restricted to their own sessions.
+    // Admin intercept on non-crisis sessions is intentional: Profe intervenes
+    // for AI-literacy reasons, not only for mental-health emergencies.
     socket.on('admin:intercept', async (data) => {
       if (socket.userType !== 'admin' && socket.userType !== 'therapist') return;
       const { sessionId, message } = data;

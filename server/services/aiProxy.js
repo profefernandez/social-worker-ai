@@ -6,8 +6,12 @@ const MISTRAL_URL = 'https://api.mistral.ai/v1/conversations';
  * Format request for Mistral Conversations API.
  */
 function formatRequest(input, conversationHistory, config) {
+  const agent_id = config.agentId || process.env.MISTRAL_AGENT_ID;
+  if (!agent_id) {
+    throw new Error('Mistral agent_id is not configured. Set MISTRAL_AGENT_ID or pass config.agentId.');
+  }
   return {
-    agent_id: config.agentId || process.env.MISTRAL_AGENT_ID,
+    agent_id,
     inputs: [
       ...conversationHistory,
       { role: 'user', content: input },
@@ -33,24 +37,33 @@ function parseFullResponse(data) {
   const content = assistantMsg?.content || '';
   const rawToolCalls = assistantMsg?.tool_calls || [];
 
-  const toolCalls = rawToolCalls.map((tc) => {
-    let parsedArgs = {};
-    try {
-      parsedArgs = typeof tc.function.arguments === 'string'
-        ? JSON.parse(tc.function.arguments)
-        : tc.function.arguments || {};
-    } catch {
-      // eslint-disable-next-line no-console
-      console.error(`Failed to parse tool_call arguments for ${tc.function?.name}:`, tc.function?.arguments);
-      parsedArgs = { _parseError: true, raw: tc.function?.arguments };
-    }
+  const toolCalls = rawToolCalls
+    .filter((tc) => tc.function && typeof tc.function.name === 'string')
+    .map((tc) => {
+      let parsedArgs = {};
+      try {
+        parsedArgs = typeof tc.function.arguments === 'string'
+          ? JSON.parse(tc.function.arguments)
+          : tc.function.arguments || {};
+      } catch {
+        const argValue = tc.function.arguments;
+        // Log only the type descriptor — never the raw value — to avoid leaking PII
+        const argSummary = typeof argValue === 'string'
+          ? `string(length=${argValue.length})`
+          : 'non-string';
+        // eslint-disable-next-line no-console
+        console.error(
+          `Failed to parse tool_call arguments for ${tc.function.name} (id=${tc.id}); arguments type: ${argSummary}`
+        );
+        parsedArgs = { _parseError: true };
+      }
 
-    return {
-      id: tc.id,
-      name: tc.function.name,
-      arguments: parsedArgs,
-    };
-  });
+      return {
+        id: tc.id,
+        name: tc.function.name,
+        arguments: parsedArgs,
+      };
+    });
 
   return { content, toolCalls };
 }

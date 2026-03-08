@@ -205,6 +205,6 @@ describe('aiProxy (Mistral-only)', () => {
     });
 
     expect(result.toolCalls[0].arguments._parseError).toBe(true);
-    expect(result.toolCalls[0].arguments.raw).toBe('not valid json {{{');
+    expect(result.toolCalls[0].arguments.raw).toBeUndefined();
   });
 });

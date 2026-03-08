@@ -4,12 +4,10 @@ import { Lightbulb, ArrowRight } from 'lucide-react';
 
 export default function ConsentGate({ onConsent }) {
   const [agreed, setAgreed] = useState(false);
-  const [email, setEmail] = useState('');
   const containerRef = useRef(null);
   const ctaRef = useRef(null);
 
-  const validEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-  const canSubmit = agreed && validEmail;
+  const canSubmit = agreed;
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -54,7 +52,7 @@ export default function ConsentGate({ onConsent }) {
             <div>
               <h3 className="text-ember-text font-heading text-sm mb-1">2. Children's Privacy (COPPA Compliance)</h3>
               <p>
-                This service complies with the Children's Online Privacy Protection Act (COPPA). We collect only the minimum data necessary to provide the assessment: chat messages, timestamps, and a parent email address. We do not collect biometric data, location data, or persistent identifiers from children. If your child is under 13, this parental consent is required before use.
+                This service complies with the Children's Online Privacy Protection Act (COPPA). We collect only the minimum data necessary to provide the assessment: chat messages and timestamps. We do not collect biometric data, location data, or persistent identifiers from children. If your child is under 13, this parental consent is required before use.
               </p>
             </div>
 
@@ -89,16 +87,8 @@ export default function ConsentGate({ onConsent }) {
           </div>
         </div>
 
-        {/* Email + Consent */}
+        {/* Consent */}
         <div className="space-y-3 flex-shrink-0">
-          <input
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="Parent/guardian email address"
-            className="w-full bg-ember-surface text-ember-text text-sm rounded-xl px-4 py-2.5 border border-ember-text/10 placeholder:text-ember-subtle focus:outline-none focus:ring-2 focus:ring-ember-primary/50"
-          />
-
           <label className="flex items-start gap-3 cursor-pointer frost-panel rounded-xl px-4 py-3 border border-ember-text/5">
             <input
               type="checkbox"
