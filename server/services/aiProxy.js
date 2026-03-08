@@ -6,8 +6,12 @@ const MISTRAL_URL = 'https://api.mistral.ai/v1/conversations';
  * Format request for Mistral Conversations API.
  */
 function formatRequest(input, conversationHistory, config) {
+  const agentId = config.agentId || process.env.MISTRAL_AGENT_ID;
+  if (!agentId) {
+    throw new Error('Mistral agent_id not configured — set agentId in config or MISTRAL_AGENT_ID env var');
+  }
   return {
-    agent_id: config.agentId || process.env.MISTRAL_AGENT_ID,
+    agent_id: agentId,
     inputs: [
       ...conversationHistory,
       { role: 'user', content: input },
@@ -33,24 +37,36 @@ function parseFullResponse(data) {
   const content = assistantMsg?.content || '';
   const rawToolCalls = assistantMsg?.tool_calls || [];
 
-  const toolCalls = rawToolCalls.map((tc) => {
+  const toolCalls = rawToolCalls.reduce((acc, tc) => {
+    // Guard against unexpected Mistral response shape
+    if (!tc.function || typeof tc.function.name !== 'string') {
+      // eslint-disable-next-line no-console
+      console.error(`Skipping malformed tool_call (id=${tc.id}): missing function or function.name`);
+      return acc;
+    }
+
     let parsedArgs = {};
     try {
       parsedArgs = typeof tc.function.arguments === 'string'
         ? JSON.parse(tc.function.arguments)
         : tc.function.arguments || {};
     } catch {
+      const argValue = tc.function.arguments;
+      const argSummary = typeof argValue === 'string'
+        ? `string(length=${argValue.length})`
+        : typeof argValue;
       // eslint-disable-next-line no-console
-      console.error(`Failed to parse tool_call arguments for ${tc.function?.name}:`, tc.function?.arguments);
-      parsedArgs = { _parseError: true, raw: tc.function?.arguments };
+      console.error(`Failed to parse tool_call arguments for ${tc.function.name} (id=${tc.id}); arguments summary: ${argSummary}`);
+      parsedArgs = { _parseError: true, raw: tc.function.arguments };
     }
 
-    return {
+    acc.push({
       id: tc.id,
       name: tc.function.name,
       arguments: parsedArgs,
-    };
-  });
+    });
+    return acc;
+  }, []);
 
   return { content, toolCalls };
 }

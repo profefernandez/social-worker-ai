@@ -114,7 +114,7 @@ export default function ConsentGate({ onConsent }) {
           {canSubmit && (
             <button
               ref={ctaRef}
-              onClick={onConsent}
+              onClick={() => onConsent({ email })}
               className="w-full ember-gradient rounded-xl px-6 py-3 text-ember-text font-medium text-base flex items-center justify-center gap-2 ember-glow transition-all hover:scale-[1.01] active:scale-[0.99]"
             >
               I Consent — Continue to Demo
