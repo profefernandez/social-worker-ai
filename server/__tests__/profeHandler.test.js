@@ -57,7 +57,8 @@ describe('profeHandler', () => {
     );
   });
 
-  test('flag_intervention returns intervention with message', async () => {
+  test('flag_intervention returns intervention with message and creates audit log', async () => {
+    const { pool } = require('../config/db');
     const toolCalls = [
       {
         id: 'call_002',
@@ -75,6 +76,47 @@ describe('profeHandler', () => {
 
     expect(result.intervention).toBe(true);
     expect(result.interventionMessage).toBe('Remember, AI is a tool, not a friend!');
+    // Verify audit trail was created
+    expect(pool.execute).toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO audit_log'),
+      expect.arrayContaining([sessionId, 'profe_agent', 'flag_intervention'])
+    );
+  });
+
+  test('flag_intervention still intervenes even if DB write fails', async () => {
+    const { pool } = require('../config/db');
+    pool.execute.mockRejectedValueOnce(new Error('DB connection lost'));
+
+    const toolCalls = [
+      {
+        id: 'call_db_fail',
+        name: 'flag_intervention',
+        arguments: {
+          severity: 'high',
+          message_to_child: 'Safety first!',
+          reason: 'Testing DB failure',
+        },
+      },
+    ];
+
+    const result = await handleProfeCalls(toolCalls, sessionId, mockIo);
+
+    // Intervention must still happen even when DB fails
+    expect(result.intervention).toBe(true);
+    expect(result.interventionMessage).toBe('Safety first!');
+  });
+
+  test('skips tool calls with parse errors', async () => {
+    const toolCalls = [
+      {
+        id: 'call_bad',
+        name: 'check_ai_response',
+        arguments: { _parseError: true, raw: 'bad json' },
+      },
+    ];
+
+    const result = await handleProfeCalls(toolCalls, sessionId, mockIo);
+    expect(result.intervention).toBe(false);
   });
 
   test('log_observation saves to database', async () => {

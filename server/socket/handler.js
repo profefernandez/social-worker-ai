@@ -1,31 +1,26 @@
 const { pool } = require('../config/db');
 const { encrypt, decrypt } = require('../middleware/encryption');
-const { parseCrisisSignal } = require('../services/crisis');
-const { callAgent, AGENT_ROLES } = require('../services/agentOrchestrator');
 const { proxyToProvider } = require('../services/aiProxy');
-const { sendSms, makeCall } = require('../services/twilio');
-const { sendCrisisEmail } = require('../services/sendgrid');
 const { handleProfeCalls } = require('../services/profeHandler');
 const { verifySocketToken } = require('../middleware/auth');
 const { validateUUID, validateMessageLength } = require('../middleware/validation');
 
-// All authenticated dashboard sockets join the 'dashboard' room so crisis events
-// are broadcast only to authorized users.
-
 const PROFE_COMMAND = '@profe';
-const KIDDO_AGENT_ID = process.env.MISTRAL_KIDDO_AGENT_ID || 'ag_019ccbc6615476aab923e1753beee83f';
-const PROFE_AGENT_ID = process.env.MISTRAL_AGENT_ID || 'ag_019ccb3989f970d1a478a8265009287a';
+
+// Require env vars — no hardcoded agent IDs in source
+const KIDDO_AGENT_ID = process.env.MISTRAL_KIDDO_AGENT_ID;
+const PROFE_AGENT_ID = process.env.MISTRAL_AGENT_ID;
+const MISTRAL_KEY = process.env.MISTRAL_API_KEY;
 
 /**
- * Load recent conversation history from DB for the proxy provider.
- * Returns messages in OpenAI format: [{role: 'user'|'assistant', content}]
+ * Load recent conversation history from DB for Mistral.
+ * Returns messages as [{role: 'user'|'assistant', content}]
  */
 async function loadConversationHistory(sessionId, limit = 20) {
   const [rows] = await pool.execute(
     'SELECT sender, content_encrypted, iv FROM messages WHERE session_id = ? ORDER BY created_at DESC LIMIT ?',
     [sessionId, limit]
   );
-  // Reverse so oldest first
   return rows.reverse().map((row) => {
     const content = decrypt(row.content_encrypted, row.iv);
     const role = row.sender === 'client' ? 'user' : 'assistant';
@@ -34,11 +29,24 @@ async function loadConversationHistory(sessionId, limit = 20) {
 }
 
 function setupSocketHandlers(io) {
+  // Validate Mistral config on startup
+  if (!MISTRAL_KEY) {
+    // eslint-disable-next-line no-console
+    console.warn('WARNING: MISTRAL_API_KEY not set — AI features will not work');
+  }
+  if (!KIDDO_AGENT_ID) {
+    // eslint-disable-next-line no-console
+    console.warn('WARNING: MISTRAL_KIDDO_AGENT_ID not set — chatbot will not work');
+  }
+  if (!PROFE_AGENT_ID) {
+    // eslint-disable-next-line no-console
+    console.warn('WARNING: MISTRAL_AGENT_ID not set — Profe will not work');
+  }
+
   // Authenticate all socket connections
   io.use((socket, next) => {
     const token = socket.handshake.auth.token;
     if (!token) {
-      // Unauthenticated — chatbot client
       socket.userType = 'client';
       return next();
     }
@@ -56,12 +64,8 @@ function setupSocketHandlers(io) {
     console.log(`Socket connected: ${socket.id} (${socket.userType})`);
 
     if (socket.userType === 'admin' || socket.userType === 'therapist') {
-      // All dashboard users join a shared room for crisis broadcasts
       socket.join('dashboard');
 
-      // Dashboard clients subscribe to a specific session room
-      // — therapists may only subscribe to their own sessions
-      // — admins may only subscribe to crisis-active sessions
       socket.on('subscribe:session', async (sessionId) => {
         if (!sessionId) return;
         try {
@@ -80,7 +84,6 @@ function setupSocketHandlers(io) {
       });
     }
 
-    // Chatbot clients join their session room after the server validates the session exists
     if (socket.userType === 'client') {
       socket.on('client:join', async (sessionId) => {
         if (!sessionId || !validateUUID(sessionId)) {
@@ -93,7 +96,6 @@ function setupSocketHandlers(io) {
           );
 
           if (rows.length === 0) {
-            // Demo mode: auto-create session
             if (process.env.DEMO_MODE === 'true') {
               const demoUserId = parseInt(process.env.DEMO_USER_ID, 10) || 1;
               await pool.execute(
@@ -101,7 +103,7 @@ function setupSocketHandlers(io) {
                 [sessionId, demoUserId, 'demo-judge']
               );
             } else {
-              return; // unknown session — reject silently
+              return;
             }
           }
 
@@ -113,7 +115,7 @@ function setupSocketHandlers(io) {
       });
     }
 
-    // Chatbot client sends a message
+    // ── Client sends a message ──
     socket.on('client:message', async (data) => {
       const { sessionId, message } = data;
       if (!sessionId || !message) return;
@@ -122,7 +124,7 @@ function setupSocketHandlers(io) {
       }
 
       try {
-        // 1. Validate session first to avoid wasted work on invalid IDs
+        // 1. Validate session
         const [sessions] = await pool.execute('SELECT * FROM sessions WHERE id = ?', [sessionId]);
         if (sessions.length === 0) {
           socket.emit('error', { message: 'Invalid session' });
@@ -130,18 +132,14 @@ function setupSocketHandlers(io) {
         }
         const session = sessions[0];
 
-        // 2. Get therapist info for API key and notifications
-        const [users] = await pool.execute('SELECT * FROM users WHERE id = ?', [session.user_id]);
-        const therapist = users[0];
-
-        // 3. Save the client message encrypted
+        // 2. Save the client message encrypted
         const { encrypted, iv } = encrypt(message);
         await pool.execute(
-          'INSERT INTO messages (session_id, sender, content_encrypted, iv) VALUES (?, ?, ?, ?)',
-          [sessionId, 'client', encrypted, iv]
+          'INSERT INTO messages (session_id, sender, sender_type, content_encrypted, iv) VALUES (?, ?, ?, ?, ?)',
+          [sessionId, 'client', 'user', encrypted, iv]
         );
 
-        // 4. If Jason has taken over, don't send to any AI
+        // 3. If Jason has taken over, don't send to any AI
         if (session.active_agent_id === 'ADMIN') {
           io.to('dashboard').emit('session:update', {
             sessionId,
@@ -150,64 +148,31 @@ function setupSocketHandlers(io) {
           return;
         }
 
-        // 5. If crisis already active, route to Social Worker AI (it's the active responder)
-        if (session.crisis_active) {
-          let aiResponse = '';
-          try {
-            const result = await callAgent(AGENT_ROLES.SOCIAL_WORKER, message, session.lemonade_conversation_id);
-            if (!session.lemonade_conversation_id && result.conversationId) {
-              await pool.execute(
-                'UPDATE sessions SET lemonade_conversation_id = ? WHERE id = ?',
-                [result.conversationId, sessionId]
-              );
-            }
-            aiResponse = result.response || "I'm here with you. Can you tell me more about what you're going through?";
-          } catch {
-            aiResponse = "I'm here with you. Can you tell me more about what you're going through?";
-          }
-
-          const swEnc = encrypt(aiResponse);
-          await pool.execute(
-            'INSERT INTO messages (session_id, sender, content_encrypted, iv) VALUES (?, ?, ?, ?)',
-            [sessionId, 'social_worker_ai', swEnc.encrypted, swEnc.iv]
-          );
-          socket.emit('ai:message', { sessionId, message: aiResponse, sender: 'social_worker_ai' });
-          io.to('dashboard').emit('session:update', { sessionId, crisisActive: true });
+        // 4. Check Mistral config
+        if (!MISTRAL_KEY || !KIDDO_AGENT_ID) {
+          socket.emit('ai:message', {
+            sessionId,
+            message: 'AI is not configured. Please set MISTRAL_API_KEY and MISTRAL_KIDDO_AGENT_ID.',
+            sender: 'system',
+          });
           return;
         }
 
-        // 6. Check for @profe command — route directly to Profe Mistral agent
+        // 5. Check for @profe command — route directly to Profe agent
         const isProfeCommand = message.toLowerCase().includes(PROFE_COMMAND);
         if (isProfeCommand) {
-          const mistralKey = process.env.MISTRAL_API_KEY;
           let profeResponse = '';
-
-          if (mistralKey) {
-            try {
-              const history = await loadConversationHistory(sessionId);
-              profeResponse = await proxyToProvider(message, history, {
-                provider: 'mistral',
-                apiKey: mistralKey,
-                agentId: PROFE_AGENT_ID,
-              });
-            } catch (err) {
-              console.error('@profe Mistral call failed:', err.message);
-              profeResponse = "Hey, I'm Profe! I'm here to help you understand AI better. What's on your mind?";
-            }
-          } else {
-            // Fallback to Lemonade if no Mistral key
-            try {
-              const result = await callAgent(AGENT_ROLES.SOCIAL_WORKER, message, session.lemonade_conversation_id);
-              if (!session.lemonade_conversation_id && result.conversationId) {
-                await pool.execute(
-                  'UPDATE sessions SET lemonade_conversation_id = ? WHERE id = ?',
-                  [result.conversationId, sessionId]
-                );
-              }
-              profeResponse = result.response || "Hey, I'm Profe! I'm here to help you understand AI better. What's on your mind?";
-            } catch {
-              profeResponse = "Hey, I'm Profe! I'm here to help you understand AI better. What's on your mind?";
-            }
+          try {
+            const history = await loadConversationHistory(sessionId);
+            profeResponse = await proxyToProvider(message, history, {
+              provider: 'mistral',
+              apiKey: MISTRAL_KEY,
+              agentId: PROFE_AGENT_ID,
+            });
+          } catch (err) {
+            // eslint-disable-next-line no-console
+            console.error('@profe Mistral call failed:', err.message);
+            profeResponse = "Hey, I'm Profe! I'm here to help you understand AI better. What's on your mind?";
           }
 
           const profeEnc = encrypt(profeResponse);
@@ -215,101 +180,67 @@ function setupSocketHandlers(io) {
             'INSERT INTO messages (session_id, sender, sender_type, content_encrypted, iv) VALUES (?, ?, ?, ?, ?)',
             [sessionId, 'profe', 'profe', profeEnc.encrypted, profeEnc.iv]
           );
-          socket.emit('ai:message', { sessionId, message: profeResponse, sender: 'social_worker_ai' });
+
+          // Audit trail for @profe command
+          await pool.execute(
+            'INSERT INTO audit_log (session_id, actor, action, detail) VALUES (?, ?, ?, ?)',
+            [sessionId, 'system', 'profe_command', `@profe invoked (${message.length} chars)`]
+          );
+
+          socket.emit('ai:message', { sessionId, message: profeResponse, sender: 'profe' });
           io.to('dashboard').emit('session:update', { sessionId, crisisActive: false });
           return;
         }
 
-        // 7. Normal mode: send to Kiddo AI AND Profe (silent monitor) in parallel
-        const mistralKey = process.env.MISTRAL_API_KEY;
-        const useMistral = !!mistralKey;
+        // 6. Normal mode — SEQUENTIAL: Kiddo first, then Profe monitors the response
+        const history = await loadConversationHistory(sessionId);
 
-        let chatbotCall;
-        let profeCall;
-
-        if (useMistral) {
-          const history = await loadConversationHistory(sessionId);
-
-          // Kiddo chatbot agent — text response
-          chatbotCall = proxyToProvider(message, history, {
+        // 6a. Call Kiddo chatbot agent
+        let aiResponse = '';
+        try {
+          aiResponse = await proxyToProvider(message, history, {
             provider: 'mistral',
-            apiKey: mistralKey,
+            apiKey: MISTRAL_KEY,
             agentId: KIDDO_AGENT_ID,
           });
-
-          // Profe monitor — function call response
-          profeCall = proxyToProvider(message, history, {
-            provider: 'mistral',
-            apiKey: mistralKey,
-            agentId: PROFE_AGENT_ID,
-            returnFullResponse: true,
-          });
-        } else {
-          // Fallback: OpenAI proxy or Lemonade
-          const proxyProvider = process.env.AI_PROVIDER || (process.env.OPENAI_API_KEY ? 'openai' : null);
-          const proxyApiKey = process.env.OPENAI_API_KEY;
-          const useProxy = !!proxyApiKey;
-          const conversationHistory = useProxy ? await loadConversationHistory(sessionId) : [];
-
-          chatbotCall = useProxy
-            ? proxyToProvider(message, conversationHistory, {
-                provider: proxyProvider,
-                apiKey: proxyApiKey,
-                model: process.env.AI_MODEL || 'gpt-4o-mini',
-                systemPrompt: process.env.AI_SYSTEM_PROMPT || process.env.OPENAI_SYSTEM_PROMPT || '',
-              })
-            : callAgent(AGENT_ROLES.CHATBOT, message, session.lemonade_conversation_id);
-
-          profeCall = callAgent(AGENT_ROLES.SOCIAL_WORKER, message);
-        }
-
-        const [chatbotResult, profeResult] = await Promise.allSettled([chatbotCall, profeCall]);
-
-        // 8. Process chatbot response — this is what the user sees
-        let aiResponse = '';
-        if (chatbotResult.status === 'fulfilled') {
-          if (typeof chatbotResult.value === 'string') {
-            aiResponse = chatbotResult.value || "I'm here to help. What would you like to work on?";
-          } else {
-            // Lemonade mode
-            const result = chatbotResult.value;
-            if (!session.lemonade_conversation_id && result.conversationId) {
-              await pool.execute(
-                'UPDATE sessions SET lemonade_conversation_id = ? WHERE id = ?',
-                [result.conversationId, sessionId]
-              );
-            }
-            aiResponse = result.response || "I'm here to support you. Can you tell me more?";
-          }
-        } else {
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.error('Kiddo agent failed:', err.message);
           aiResponse = "I'm here to help. What would you like to work on?";
         }
 
-        // 9. Process Profe monitoring response
-        let crisisTriggered = false;
+        if (!aiResponse) {
+          aiResponse = "I'm here to help. What would you like to work on?";
+        }
+
+        // 6b. Send BOTH user message AND kiddo response to Profe for monitoring
+        //     Profe needs to see what the AI said to evaluate safety/sycophancy
         let profeIntervened = false;
         let interventionMessage = null;
 
-        if (profeResult.status === 'fulfilled') {
-          if (useMistral && profeResult.value?.toolCalls) {
-            // Mistral mode — process function calls
-            const profeOutcome = await handleProfeCalls(profeResult.value.toolCalls, sessionId, io);
-            profeIntervened = profeOutcome.intervention;
-            interventionMessage = profeOutcome.interventionMessage;
-          } else if (profeResult.value?.response) {
-            // Lemonade mode — check for crisis signal
-            const { isCrisis } = parseCrisisSignal(profeResult.value.response);
-            crisisTriggered = isCrisis;
+        if (PROFE_AGENT_ID) {
+          try {
+            const profeInput = `[USER MESSAGE]: ${message}\n\n[AI RESPONSE]: ${aiResponse}`;
+            const profeResult = await proxyToProvider(profeInput, history, {
+              provider: 'mistral',
+              apiKey: MISTRAL_KEY,
+              agentId: PROFE_AGENT_ID,
+              returnFullResponse: true,
+            });
+
+            if (profeResult?.toolCalls?.length > 0) {
+              const profeOutcome = await handleProfeCalls(profeResult.toolCalls, sessionId, io);
+              profeIntervened = profeOutcome.intervention;
+              interventionMessage = profeOutcome.interventionMessage;
+            }
+          } catch (err) {
+            // eslint-disable-next-line no-console
+            console.error('Profe monitor failed:', err.message);
+            // Profe failure should not block the kiddo response
           }
         }
 
-        // 10. Crisis protocol (Lemonade fallback path)
-        if (crisisTriggered) {
-          await activateCrisisProtocol(session, sessionId, message, therapist, io);
-          return;
-        }
-
-        // 11. Profe intervention — replace or append to kiddo response
+        // 7. Profe intervention — replace kiddo response
         if (profeIntervened && interventionMessage) {
           // Save Profe's intervention message
           const profeEnc = encrypt(interventionMessage);
@@ -326,12 +257,12 @@ function setupSocketHandlers(io) {
           );
 
           // Send Profe's message to the user instead
-          socket.emit('ai:message', { sessionId, message: interventionMessage, sender: 'social_worker_ai' });
+          socket.emit('ai:message', { sessionId, message: interventionMessage, sender: 'profe' });
           io.to('dashboard').emit('session:update', { sessionId, crisisActive: false });
           return;
         }
 
-        // 12. No intervention — save and emit the regular kiddo response
+        // 8. No intervention — save and emit the regular kiddo response
         const aiEnc = encrypt(aiResponse);
         await pool.execute(
           'INSERT INTO messages (session_id, sender, sender_type, content_encrypted, iv) VALUES (?, ?, ?, ?, ?)',
@@ -339,7 +270,7 @@ function setupSocketHandlers(io) {
         );
         socket.emit('ai:message', { sessionId, message: aiResponse, sender: 'ai' });
 
-        // 13. Notify dashboard of session activity
+        // 9. Notify dashboard of session activity
         io.to('dashboard').emit('session:update', {
           sessionId,
           crisisActive: false,
@@ -350,7 +281,7 @@ function setupSocketHandlers(io) {
       }
     });
 
-    // Admin/therapist sends an intercept message into a crisis session
+    // ── Admin intercept message ──
     socket.on('admin:intercept', async (data) => {
       if (socket.userType !== 'admin' && socket.userType !== 'therapist') return;
       const { sessionId, message } = data;
@@ -360,31 +291,26 @@ function setupSocketHandlers(io) {
       }
 
       try {
-        // Verify the session exists, is crisis-active, and belongs to the right user
         const [rows] = await pool.execute(
-          'SELECT * FROM sessions WHERE id = ? AND crisis_active = 1',
+          'SELECT * FROM sessions WHERE id = ?',
           [sessionId]
         );
         if (rows.length === 0) return;
         const session = rows[0];
 
-        // Therapists may only intercept their own sessions
         if (socket.userType === 'therapist' && session.user_id !== socket.user.id) return;
 
-        // Save intercept message encrypted
         const { encrypted, iv } = encrypt(message);
         await pool.execute(
-          'INSERT INTO messages (session_id, sender, content_encrypted, iv) VALUES (?, ?, ?, ?)',
-          [sessionId, 'admin', encrypted, iv]
+          'INSERT INTO messages (session_id, sender, sender_type, content_encrypted, iv) VALUES (?, ?, ?, ?, ?)',
+          [sessionId, 'admin', 'admin', encrypted, iv]
         );
 
-        // Audit log — record metadata only, not plaintext content
         await pool.execute(
           'INSERT INTO audit_log (session_id, actor, action, detail) VALUES (?, ?, ?, ?)',
           [sessionId, socket.user.email, 'intercepted', `Message sent (${message.length} chars)`]
         );
 
-        // Deliver intercept to all subscribers of this session (chatbot client + dashboard)
         io.to(`session:${sessionId}`).emit('admin:message', { sessionId, message });
       } catch (err) {
         // eslint-disable-next-line no-console
@@ -392,48 +318,32 @@ function setupSocketHandlers(io) {
       }
     });
 
-    // Jason takes over the conversation from Social Worker AI
+    // ── Jason takes over the conversation ──
     socket.on('admin:takeover', async ({ sessionId }) => {
       if (socket.userType !== 'admin') return;
       if (!sessionId || !validateUUID(sessionId)) return;
 
       try {
         const [rows] = await pool.execute(
-          'SELECT * FROM sessions WHERE id = ? AND crisis_active = 1',
+          'SELECT * FROM sessions WHERE id = ?',
           [sessionId]
         );
         if (rows.length === 0) return;
 
-        // Set active agent to ADMIN — stops AI from responding
         await pool.execute(
           'UPDATE sessions SET active_agent_id = ? WHERE id = ?',
           ['ADMIN', sessionId]
         );
 
-        // Audit
         await pool.execute(
           'INSERT INTO audit_log (session_id, actor, action, detail) VALUES (?, ?, ?, ?)',
           [sessionId, socket.user.email, 'admin_takeover', 'Jason entered the conversation']
         );
 
-        // Notify chatbot + dashboard
         io.to(`session:${sessionId}`).emit('agent:joined', {
           sessionId,
           agentName: 'Jason Fernandez, LMSW',
         });
-
-        // Notify audit agent
-        callAgent(AGENT_ROLES.AUDIT, `ADMIN TAKEOVER. Jason Fernandez entered session ${sessionId} at ${new Date().toISOString()}.`)
-          .then((result) => {
-            io.to('dashboard').emit('agent:output', {
-              sessionId,
-              agentRole: 'audit',
-              content: result.response || 'Admin takeover logged.',
-              timestamp: new Date().toISOString(),
-            });
-          })
-          .catch((err) => console.error('Audit agent failed on takeover:', err.message));
-
       } catch (err) {
         // eslint-disable-next-line no-console
         console.error('admin:takeover error:', err.message);
@@ -445,156 +355,6 @@ function setupSocketHandlers(io) {
       console.log(`Socket disconnected: ${socket.id}`);
     });
   });
-}
-
-async function activateCrisisProtocol(session, sessionId, triggerMessage, therapist, io) {
-  try {
-    // 1. Mark session crisis-active and switch to Social Worker AI
-    const socialWorkerId = process.env.LEMONADE_AGENT_SOCIAL_WORKER_ID;
-    await pool.execute(
-      'UPDATE sessions SET crisis_active = 1, crisis_activated_at = NOW(), active_agent_id = ? WHERE id = ?',
-      [socialWorkerId, sessionId]
-    );
-
-    // 2. Audit log
-    await pool.execute(
-      'INSERT INTO audit_log (session_id, actor, action, detail) VALUES (?, ?, ?, ?)',
-      [sessionId, 'system', 'crisis_activated', 'Social Worker AI agent triggered crisis protocol']
-    );
-
-    const summary = `Crisis detected in session ${sessionId}. Social Worker AI agent activated protocol.`;
-
-    // 3. Emit agent:joined to chatbot + dashboard
-    io.to(`session:${sessionId}`).emit('agent:joined', {
-      sessionId,
-      agentName: 'Social Worker AI',
-    });
-    io.to('dashboard').emit('crisis:activated', {
-      sessionId,
-      therapistEmail: therapist ? therapist.email : null,
-      summary,
-      timestamp: new Date().toISOString(),
-    });
-
-    // 4. Fire all parallel actions — agents + notifications
-    const parallelActions = [];
-
-    // Social Worker AI responds to the user
-    parallelActions.push(
-      callAgent(AGENT_ROLES.SOCIAL_WORKER, triggerMessage, session.lemonade_conversation_id)
-        .then(async (result) => {
-          const response = result.response || 'I hear you, and I want you to know you are not alone. I am here with you right now.';
-          const enc = encrypt(response);
-          await pool.execute(
-            'INSERT INTO messages (session_id, sender, content_encrypted, iv) VALUES (?, ?, ?, ?)',
-            [sessionId, 'social_worker_ai', enc.encrypted, enc.iv]
-          );
-          io.to(`session:${sessionId}`).emit('ai:message', {
-            sessionId,
-            message: response,
-            sender: 'social_worker_ai',
-          });
-          if (result.conversationId && !session.lemonade_conversation_id) {
-            await pool.execute(
-              'UPDATE sessions SET lemonade_conversation_id = ? WHERE id = ?',
-              [result.conversationId, sessionId]
-            );
-          }
-        })
-        .catch((err) => console.error('Social Worker AI agent failed:', err.message))
-    );
-
-    // Search Agent — find the user
-    parallelActions.push(
-      callAgent(AGENT_ROLES.SEARCH, `Crisis in session ${sessionId}. Client identifier: ${session.client_identifier || 'unknown'}. Find any available information about this user.`)
-        .then((result) => {
-          io.to('dashboard').emit('agent:output', {
-            sessionId,
-            agentRole: 'search',
-            content: result.response || 'Searching for user information...',
-            timestamp: new Date().toISOString(),
-          });
-        })
-        .catch((err) => console.error('Search agent failed:', err.message))
-    );
-
-    // Comms Agent — notify Jason + company owner
-    parallelActions.push(
-      callAgent(AGENT_ROLES.COMMS, `CRISIS ACTIVATED. Session: ${sessionId}. ${summary}. Therapist: ${therapist ? therapist.email : 'unknown'}. Notify all parties.`)
-        .then((result) => {
-          io.to('dashboard').emit('agent:output', {
-            sessionId,
-            agentRole: 'comms',
-            content: result.response || 'Notifications dispatched.',
-            timestamp: new Date().toISOString(),
-          });
-        })
-        .catch((err) => console.error('Comms agent failed:', err.message))
-    );
-
-    // Audit Agent — log the crisis activation
-    parallelActions.push(
-      callAgent(AGENT_ROLES.AUDIT, `CRISIS ACTIVATED. Session: ${sessionId}. Social Worker AI agent triggered protocol. Time: ${new Date().toISOString()}. Log this event.`)
-        .then((result) => {
-          io.to('dashboard').emit('agent:output', {
-            sessionId,
-            agentRole: 'audit',
-            content: result.response || 'Crisis activation logged.',
-            timestamp: new Date().toISOString(),
-          });
-        })
-        .catch((err) => console.error('Audit agent failed:', err.message))
-    );
-
-    // Twilio SMS
-    const monitoringPhone = process.env.TWILIO_MONITOR_PHONE || process.env.TWILIO_PHONE_NUMBER;
-    if (monitoringPhone && process.env.TWILIO_ACCOUNT_SID) {
-      parallelActions.push(
-        sendSms(monitoringPhone, `[CRISIS ALERT] ${summary}`)
-          .then(async (smsSid) => {
-            await pool.execute(
-              'INSERT INTO notifications (session_id, type, recipient, status) VALUES (?, ?, ?, ?)',
-              [sessionId, 'sms', monitoringPhone, smsSid ? 'sent' : 'failed']
-            );
-          })
-          .catch((err) => console.error('Twilio SMS failed:', err.message))
-      );
-
-      // Twilio voice call
-      parallelActions.push(
-        makeCall(monitoringPhone, 'Crisis alert. A user needs immediate assistance. Check the dashboard now.')
-          .then(async (callSid) => {
-            await pool.execute(
-              'INSERT INTO notifications (session_id, type, recipient, status) VALUES (?, ?, ?, ?)',
-              [sessionId, 'call', monitoringPhone, callSid ? 'sent' : 'failed']
-            );
-          })
-          .catch((err) => console.error('Twilio call failed:', err.message))
-      );
-    }
-
-    // SendGrid email
-    const monitoringEmail = process.env.SENDGRID_MONITOR_EMAIL || process.env.SENDGRID_FROM_EMAIL;
-    if (monitoringEmail && process.env.SENDGRID_API_KEY) {
-      parallelActions.push(
-        sendCrisisEmail(monitoringEmail, sessionId, summary)
-          .then(async () => {
-            await pool.execute(
-              'INSERT INTO notifications (session_id, type, recipient, status) VALUES (?, ?, ?, ?)',
-              [sessionId, 'email', monitoringEmail, 'sent']
-            );
-          })
-          .catch((err) => console.error('SendGrid failed:', err.message))
-      );
-    }
-
-    // Fire all in parallel — don't let any single failure stop the rest
-    await Promise.allSettled(parallelActions);
-
-  } catch (err) {
-    // eslint-disable-next-line no-console
-    console.error('Crisis protocol activation failed:', err.message);
-  }
 }
 
 module.exports = { setupSocketHandlers };

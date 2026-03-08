@@ -3,94 +3,14 @@ jest.mock('axios');
 
 const { proxyToProvider } = require('../services/aiProxy');
 
-describe('aiProxy', () => {
+describe('aiProxy (Mistral-only)', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-  });
-
-  test('calls OpenAI with correct format', async () => {
-    axios.post.mockResolvedValue({
-      data: {
-        choices: [{ message: { content: 'Here is the answer!' } }],
-      },
-    });
-
-    const result = await proxyToProvider('What is 2+2?', [], {
-      provider: 'openai',
-      apiKey: 'test-key',
-      model: 'gpt-4o-mini',
-      systemPrompt: 'You are a helpful tutor.',
-    });
-
-    expect(result).toBe('Here is the answer!');
-    expect(axios.post).toHaveBeenCalledWith(
-      'https://api.openai.com/v1/chat/completions',
-      expect.objectContaining({
-        model: 'gpt-4o-mini',
-        messages: expect.arrayContaining([
-          { role: 'system', content: 'You are a helpful tutor.' },
-          { role: 'user', content: 'What is 2+2?' },
-        ]),
-      }),
-      expect.objectContaining({
-        headers: expect.objectContaining({
-          Authorization: 'Bearer test-key',
-        }),
-      })
-    );
-  });
-
-  test('passes conversation history', async () => {
-    axios.post.mockResolvedValue({
-      data: { choices: [{ message: { content: 'Sure!' } }] },
-    });
-
-    const history = [
-      { role: 'user', content: 'Hello' },
-      { role: 'assistant', content: 'Hi there!' },
-    ];
-
-    await proxyToProvider('Help me', history, { apiKey: 'test-key' });
-
-    const callArgs = axios.post.mock.calls[0][1];
-    expect(callArgs.messages).toHaveLength(3); // no systemPrompt + 2 history + 1 new
-  });
-
-  test('throws for unknown provider', async () => {
-    await expect(
-      proxyToProvider('Hi', [], { provider: 'unknown', apiKey: 'key' })
-    ).rejects.toThrow('Unknown AI provider');
-  });
-
-  test('throws when no API key', async () => {
-    delete process.env.OPENAI_API_KEY;
-    await expect(
-      proxyToProvider('Hi', [], { provider: 'openai' })
-    ).rejects.toThrow('API key not configured');
-  });
-
-  test('uses env fallback for API key', async () => {
-    process.env.OPENAI_API_KEY = 'env-key';
-    axios.post.mockResolvedValue({
-      data: { choices: [{ message: { content: 'ok' } }] },
-    });
-
-    await proxyToProvider('Hi', [], { provider: 'openai' });
-
-    expect(axios.post).toHaveBeenCalledWith(
-      expect.any(String),
-      expect.any(Object),
-      expect.objectContaining({
-        headers: expect.objectContaining({
-          Authorization: 'Bearer env-key',
-        }),
-      })
-    );
-    delete process.env.OPENAI_API_KEY;
+    delete process.env.MISTRAL_API_KEY;
+    delete process.env.MISTRAL_AGENT_ID;
   });
 
   test('calls Mistral Conversations API with agent ID', async () => {
-    process.env.MISTRAL_AGENT_ID = 'ag_test123';
     axios.post.mockResolvedValue({
       data: {
         outputs: [{ role: 'assistant', content: 'Mistral agent response!' }],
@@ -98,7 +18,6 @@ describe('aiProxy', () => {
     });
 
     const result = await proxyToProvider('Explain gravity', [], {
-      provider: 'mistral',
       apiKey: 'mistral-test-key',
       agentId: 'ag_test123',
     });
@@ -116,10 +35,54 @@ describe('aiProxy', () => {
         }),
       })
     );
-    delete process.env.MISTRAL_AGENT_ID;
   });
 
-  test('Mistral parseResponse extracts tool_calls when present', async () => {
+  test('passes conversation history as inputs', async () => {
+    axios.post.mockResolvedValue({
+      data: { outputs: [{ role: 'assistant', content: 'ok' }] },
+    });
+
+    const history = [
+      { role: 'user', content: 'Hello' },
+      { role: 'assistant', content: 'Hi!' },
+    ];
+
+    await proxyToProvider('Next question', history, {
+      apiKey: 'key',
+      agentId: 'ag_test',
+    });
+
+    const callArgs = axios.post.mock.calls[0][1];
+    expect(callArgs.inputs).toHaveLength(3);
+    expect(callArgs.inputs[2]).toEqual({ role: 'user', content: 'Next question' });
+  });
+
+  test('throws when no API key', async () => {
+    await expect(
+      proxyToProvider('Hi', [], {})
+    ).rejects.toThrow('MISTRAL_API_KEY not configured');
+  });
+
+  test('uses env fallback for API key', async () => {
+    process.env.MISTRAL_API_KEY = 'env-key';
+    axios.post.mockResolvedValue({
+      data: { outputs: [{ role: 'assistant', content: 'ok' }] },
+    });
+
+    await proxyToProvider('Hi', [], { agentId: 'ag_test' });
+
+    expect(axios.post).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(Object),
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: 'Bearer env-key',
+        }),
+      })
+    );
+  });
+
+  test('extracts tool_calls when returnFullResponse is true', async () => {
     axios.post.mockResolvedValue({
       data: {
         outputs: [
@@ -147,7 +110,6 @@ describe('aiProxy', () => {
     });
 
     const result = await proxyToProvider('Hello', [], {
-      provider: 'mistral',
       apiKey: 'key',
       agentId: 'ag_profe',
       returnFullResponse: true,
@@ -171,7 +133,7 @@ describe('aiProxy', () => {
     });
   });
 
-  test('Mistral parseResponse returns text-only when no tool_calls', async () => {
+  test('returns text-only when no tool_calls and returnFullResponse is true', async () => {
     axios.post.mockResolvedValue({
       data: {
         outputs: [{ role: 'assistant', content: 'Just a text reply' }],
@@ -179,7 +141,6 @@ describe('aiProxy', () => {
     });
 
     const result = await proxyToProvider('Hi', [], {
-      provider: 'mistral',
       apiKey: 'key',
       agentId: 'ag_test',
       returnFullResponse: true,
@@ -191,15 +152,12 @@ describe('aiProxy', () => {
     });
   });
 
-  test('Mistral returns string when returnFullResponse is false (backward compat)', async () => {
+  test('returns string when returnFullResponse is false', async () => {
     axios.post.mockResolvedValue({
-      data: {
-        outputs: [{ role: 'assistant', content: 'text reply' }],
-      },
+      data: { outputs: [{ role: 'assistant', content: 'text reply' }] },
     });
 
     const result = await proxyToProvider('Hi', [], {
-      provider: 'mistral',
       apiKey: 'key',
       agentId: 'ag_test',
     });
@@ -212,40 +170,41 @@ describe('aiProxy', () => {
       data: { outputs: [{ role: 'assistant', content: 'ok' }] },
     });
 
-    await proxyToProvider('msg1', [], {
-      provider: 'mistral',
-      apiKey: 'key',
-      agentId: 'ag_kiddo_123',
-    });
-
-    await proxyToProvider('msg2', [], {
-      provider: 'mistral',
-      apiKey: 'key',
-      agentId: 'ag_profe_456',
-    });
+    await proxyToProvider('msg1', [], { apiKey: 'key', agentId: 'ag_kiddo_123' });
+    await proxyToProvider('msg2', [], { apiKey: 'key', agentId: 'ag_profe_456' });
 
     expect(axios.post.mock.calls[0][1].agent_id).toBe('ag_kiddo_123');
     expect(axios.post.mock.calls[1][1].agent_id).toBe('ag_profe_456');
   });
 
-  test('Mistral passes conversation history as inputs', async () => {
+  test('handles malformed tool_call arguments gracefully', async () => {
     axios.post.mockResolvedValue({
-      data: { outputs: [{ role: 'assistant', content: 'ok' }] },
+      data: {
+        outputs: [
+          {
+            role: 'assistant',
+            content: 'text',
+            tool_calls: [
+              {
+                id: 'call_bad',
+                function: {
+                  name: 'check_ai_response',
+                  arguments: 'not valid json {{{',
+                },
+              },
+            ],
+          },
+        ],
+      },
     });
 
-    const history = [
-      { role: 'user', content: 'Hello' },
-      { role: 'assistant', content: 'Hi!' },
-    ];
-
-    await proxyToProvider('Next question', history, {
-      provider: 'mistral',
+    const result = await proxyToProvider('Hi', [], {
       apiKey: 'key',
       agentId: 'ag_test',
+      returnFullResponse: true,
     });
 
-    const callArgs = axios.post.mock.calls[0][1];
-    expect(callArgs.inputs).toHaveLength(3);
-    expect(callArgs.inputs[2]).toEqual({ role: 'user', content: 'Next question' });
+    expect(result.toolCalls[0].arguments._parseError).toBe(true);
+    expect(result.toolCalls[0].arguments.raw).toBe('not valid json {{{');
   });
 });

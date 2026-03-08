@@ -52,12 +52,19 @@ app.use('/api', apiLimiter);
 
 // Demo mode — create a session without auth (for prototype only)
 if (process.env.DEMO_MODE === 'true') {
-  app.post('/api/demo/session', async (req, res) => {
+  const rateLimit = require('express-rate-limit');
+  const demoLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 5,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many demo sessions created. Try again later.' },
+  });
+
+  app.post('/api/demo/session', demoLimiter, async (req, res) => {
     try {
       const { v4: uuidv4 } = require('uuid');
       const sessionId = uuidv4();
-
-      // Use demo user ID (create a demo user in DB or use ID 1)
       const demoUserId = parseInt(process.env.DEMO_USER_ID, 10) || 1;
 
       await pool.execute(
