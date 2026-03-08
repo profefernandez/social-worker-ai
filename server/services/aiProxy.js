@@ -33,7 +33,13 @@ function parseFullResponse(data) {
   const content = assistantMsg?.content || '';
   const rawToolCalls = assistantMsg?.tool_calls || [];
 
-  const toolCalls = rawToolCalls.map((tc) => {
+  const toolCalls = rawToolCalls.reduce((acc, tc) => {
+    if (!tc.function || typeof tc.function.name !== 'string') {
+      // eslint-disable-next-line no-console
+      console.error('Skipping malformed tool_call (missing or invalid function field): id=%s', tc.id);
+      return acc;
+    }
+
     let parsedArgs = {};
     try {
       parsedArgs = typeof tc.function.arguments === 'string'
@@ -41,16 +47,17 @@ function parseFullResponse(data) {
         : tc.function.arguments || {};
     } catch {
       // eslint-disable-next-line no-console
-      console.error(`Failed to parse tool_call arguments for ${tc.function?.name}:`, tc.function?.arguments);
-      parsedArgs = { _parseError: true, raw: tc.function?.arguments };
+      console.error(`Failed to parse tool_call arguments for ${tc.function.name}: arguments could not be decoded`);
+      parsedArgs = { _parseError: true, raw: tc.function.arguments };
     }
 
-    return {
+    acc.push({
       id: tc.id,
       name: tc.function.name,
       arguments: parsedArgs,
-    };
-  });
+    });
+    return acc;
+  }, []);
 
   return { content, toolCalls };
 }

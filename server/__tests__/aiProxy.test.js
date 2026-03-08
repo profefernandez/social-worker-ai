@@ -177,6 +177,64 @@ describe('aiProxy (Mistral-only)', () => {
     expect(axios.post.mock.calls[1][1].agent_id).toBe('ag_profe_456');
   });
 
+  test('skips tool_call with missing function field', async () => {
+    axios.post.mockResolvedValue({
+      data: {
+        outputs: [
+          {
+            role: 'assistant',
+            content: 'text',
+            tool_calls: [
+              { id: 'call_no_fn' },
+              {
+                id: 'call_ok',
+                function: { name: 'check_ai_response', arguments: '{"safety_rating":90}' },
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    const result = await proxyToProvider('Hi', [], {
+      apiKey: 'key',
+      agentId: 'ag_test',
+      returnFullResponse: true,
+    });
+
+    expect(result.toolCalls).toHaveLength(1);
+    expect(result.toolCalls[0].name).toBe('check_ai_response');
+  });
+
+  test('skips tool_call whose function.name is not a string', async () => {
+    axios.post.mockResolvedValue({
+      data: {
+        outputs: [
+          {
+            role: 'assistant',
+            content: 'text',
+            tool_calls: [
+              { id: 'call_bad_name', function: { name: 42, arguments: '{}' } },
+              {
+                id: 'call_ok',
+                function: { name: 'check_ai_response', arguments: '{}' },
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    const result = await proxyToProvider('Hi', [], {
+      apiKey: 'key',
+      agentId: 'ag_test',
+      returnFullResponse: true,
+    });
+
+    expect(result.toolCalls).toHaveLength(1);
+    expect(result.toolCalls[0].name).toBe('check_ai_response');
+  });
+
   test('handles malformed tool_call arguments gracefully', async () => {
     axios.post.mockResolvedValue({
       data: {
