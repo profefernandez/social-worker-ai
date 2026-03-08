@@ -94,11 +94,11 @@ export default function CrisisView({ session, token, sendIntercept, onBack }) {
             className={`rounded-xl px-4 py-3 text-sm text-ember-text ${senderStyles[msg.sender] || ''}`}
           >
             <div className="flex items-center gap-2 mb-1">
-              <span className="text-[10px] font-mono text-ember-muted uppercase tracking-wider">
+              <span className="text-[13px] font-mono text-ember-muted uppercase tracking-wider">
                 {senderLabels[msg.sender] || msg.sender}
               </span>
               {msg.createdAt && (
-                <span className="text-[10px] font-mono text-ember-muted/50">
+                <span className="text-[13px] font-mono text-ember-subtle">
                   {new Date(msg.createdAt).toLocaleTimeString()}
                 </span>
               )}
@@ -121,7 +121,7 @@ export default function CrisisView({ session, token, sendIntercept, onBack }) {
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleSend()}
             placeholder="Send message to client..."
-            className="flex-1 bg-ember-surface text-ember-text text-sm rounded-lg px-3 py-2 border border-ember-text/10 placeholder:text-ember-muted/60 focus:outline-none focus:ring-1 focus:ring-ember-secondary/50"
+            className="flex-1 bg-ember-surface text-ember-text text-sm rounded-lg px-3 py-2 border border-ember-text/10 placeholder:text-ember-subtle focus:outline-none focus:ring-1 focus:ring-ember-secondary/50"
           />
           <button
             onClick={handleSend}

@@ -3,10 +3,10 @@ import { Phone, Mail, ExternalLink } from 'lucide-react';
 export default function SafetyBanner({ crisisActive }) {
   return (
     <div
-      className={`px-4 py-2 flex items-center justify-center gap-3 text-[10px] font-mono flex-wrap transition-colors duration-500 ${
+      className={`px-4 py-2 flex items-center justify-center gap-3 text-[13px] font-mono flex-wrap transition-colors duration-500 ${
         crisisActive
           ? 'bg-ember-crisis/20 border-b border-ember-crisis/30 text-ember-crisis'
-          : 'bg-ember-surface/50 border-b border-ember-text/5 text-ember-muted'
+          : 'bg-ember-surface border-b border-ember-text/10 text-ember-muted'
       }`}
     >
       <a href="tel:911" className="flex items-center gap-1 hover:text-ember-text transition-colors">

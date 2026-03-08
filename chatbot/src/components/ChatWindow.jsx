@@ -1,53 +1,134 @@
 import { useState, useRef, useEffect } from 'react';
 import { gsap } from 'gsap';
-import { Send, AlertTriangle, Sparkles } from 'lucide-react';
+import { Send, AlertTriangle, Sparkles, Paperclip, Image, X, Bot, User, Shield } from 'lucide-react';
 import { useChat } from '../hooks/useChat';
 import SafetyBanner from './SafetyBanner';
 
-function MessageBubble({ sender, content, index }) {
+const SENDER_CONFIG = {
+  client: {
+    align: 'right',
+    bubble: 'bg-gradient-to-br from-ember-primary/25 to-ember-secondary/15 border border-ember-primary/20',
+    avatar: { bg: 'bg-ember-primary/20', icon: User, color: 'text-ember-primary' },
+    label: null,
+  },
+  ai: {
+    align: 'left',
+    bubble: 'frost-panel border border-ember-text/5',
+    avatar: { bg: 'ember-gradient', icon: Sparkles, color: 'text-ember-text' },
+    label: 'Study Assistant',
+  },
+  social_worker_ai: {
+    align: 'left',
+    bubble: 'frost-panel border border-ember-secondary/30 bg-ember-secondary/5',
+    avatar: { bg: 'bg-ember-secondary/20 border border-ember-secondary/30', icon: Shield, color: 'text-ember-secondary' },
+    label: 'Profe',
+  },
+  admin: {
+    align: 'left',
+    bubble: 'frost-panel border border-ember-primary/30 bg-ember-primary/5',
+    avatar: { bg: 'bg-ember-primary/20 border border-ember-primary/30', icon: User, color: 'text-ember-primary' },
+    label: 'Jason Fernandez, LMSW',
+  },
+  system: {
+    align: 'center',
+    bubble: '',
+    avatar: null,
+    label: null,
+  },
+};
+
+function MessageBubble({ sender, content, index, isConsecutive }) {
   const ref = useRef(null);
+  const config = SENDER_CONFIG[sender] || SENDER_CONFIG.ai;
 
   useEffect(() => {
     if (!ref.current) return;
     gsap.fromTo(
       ref.current,
-      { y: 12, opacity: 0 },
-      { y: 0, opacity: 1, duration: 0.3, delay: index * 0.05, ease: 'power2.out' }
+      { y: 10, opacity: 0, scale: 0.98 },
+      { y: 0, opacity: 1, scale: 1, duration: 0.25, delay: index * 0.03, ease: 'power2.out' }
     );
   }, [index]);
 
-  const styles = {
-    client: 'ml-12 bg-gradient-to-br from-ember-primary/20 to-ember-secondary/10 border border-ember-primary/20 text-ember-text',
-    ai: 'mr-12 frost-panel text-ember-text',
-    social_worker_ai: 'mr-12 frost-panel border border-ember-secondary/40 text-ember-text bg-ember-secondary/5',
-    admin: 'mr-12 frost-panel border border-ember-primary/40 text-ember-text bg-ember-primary/5',
-    system: 'mx-auto text-center max-w-xs',
-  };
-
-  const labels = {
-    client: null,
-    ai: 'Study Assistant',
-    social_worker_ai: 'Profe',
-    admin: 'Jason Fernandez, LMSW',
-    system: null,
-  };
-
   if (sender === 'system') {
     return (
-      <div ref={ref} className="py-2">
-        <div className="frost-panel rounded-full px-4 py-1.5 text-[11px] font-mono text-ember-muted mx-auto w-fit border border-ember-text/10">
+      <div ref={ref} className="flex justify-center py-2">
+        <div className="frost-panel rounded-full px-4 py-1.5 text-[13px] font-mono text-ember-muted border border-ember-text/10">
           {content}
         </div>
       </div>
     );
   }
 
+  const isRight = config.align === 'right';
+  const Icon = config.avatar?.icon;
+
   return (
-    <div ref={ref} className={`rounded-xl px-4 py-3 text-sm leading-relaxed ${styles[sender] || styles.ai}`}>
-      {labels[sender] && (
-        <span className="text-xs font-mono text-ember-muted block mb-1">{labels[sender]}</span>
+    <div ref={ref} className={`flex gap-3 ${isRight ? 'flex-row-reverse' : ''} ${isConsecutive ? 'mt-1' : 'mt-4'}`}>
+      {/* Avatar */}
+      <div className="flex-shrink-0 w-8">
+        {!isConsecutive && Icon && (
+          <div className={`w-8 h-8 rounded-full flex items-center justify-center ${config.avatar.bg}`}>
+            <Icon className={`w-4 h-4 ${config.avatar.color}`} />
+          </div>
+        )}
+      </div>
+
+      {/* Bubble */}
+      <div className={`max-w-[80%] ${isRight ? 'items-end' : 'items-start'}`}>
+        {!isConsecutive && config.label && (
+          <span className={`text-xs font-mono text-ember-muted block mb-1 ${isRight ? 'text-right' : ''}`}>
+            {config.label}
+          </span>
+        )}
+        <div className={`rounded-2xl px-4 py-3 text-sm leading-relaxed text-ember-text ${config.bubble} ${
+          isRight ? 'rounded-tr-md' : 'rounded-tl-md'
+        } ${isConsecutive && isRight ? 'rounded-r-md' : ''} ${isConsecutive && !isRight ? 'rounded-l-md' : ''}`}>
+          {content}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TypingIndicator() {
+  return (
+    <div className="flex gap-3 mt-4">
+      <div className="w-8 h-8 rounded-full ember-gradient flex items-center justify-center flex-shrink-0">
+        <Sparkles className="w-4 h-4 text-ember-text" />
+      </div>
+      <div className="frost-panel border border-ember-text/5 rounded-2xl rounded-tl-md px-4 py-3">
+        <div className="flex gap-1.5">
+          <div className="w-2 h-2 rounded-full bg-ember-muted/40 animate-bounce" style={{ animationDelay: '0ms' }} />
+          <div className="w-2 h-2 rounded-full bg-ember-muted/40 animate-bounce" style={{ animationDelay: '150ms' }} />
+          <div className="w-2 h-2 rounded-full bg-ember-muted/40 animate-bounce" style={{ animationDelay: '300ms' }} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function FilePreview({ file, onRemove }) {
+  const isImage = file.type?.startsWith('image/');
+  return (
+    <div className="relative inline-flex items-center gap-2 frost-panel rounded-lg border border-ember-text/10 px-3 py-2 text-xs text-ember-muted">
+      {isImage ? (
+        <img
+          src={URL.createObjectURL(file)}
+          alt={file.name}
+          className="w-10 h-10 rounded object-cover"
+        />
+      ) : (
+        <Paperclip className="w-4 h-4 text-ember-muted" />
       )}
-      {content}
+      <span className="max-w-[120px] truncate">{file.name}</span>
+      <button
+        onClick={onRemove}
+        className="ml-1 text-ember-muted hover:text-ember-crisis transition-colors"
+        aria-label="Remove file"
+      >
+        <X className="w-3.5 h-3.5" />
+      </button>
     </div>
   );
 }
@@ -55,122 +136,222 @@ function MessageBubble({ sender, content, index }) {
 export default function ChatWindow({ sessionId }) {
   const { messages, connected, crisisActive, sendMessage } = useChat(sessionId);
   const [input, setInput] = useState('');
+  const [attachedFile, setAttachedFile] = useState(null);
+  const [isTyping, setIsTyping] = useState(false);
   const bottomRef = useRef(null);
   const containerRef = useRef(null);
+  const fileInputRef = useRef(null);
+  const textInputRef = useRef(null);
 
   useEffect(() => {
     if (!containerRef.current) return;
     gsap.fromTo(
       containerRef.current,
-      { opacity: 0 },
-      { opacity: 1, duration: 0.5, ease: 'power2.out' }
+      { opacity: 0, y: 10 },
+      { opacity: 1, y: 0, duration: 0.5, ease: 'power2.out' }
     );
   }, []);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, isTyping]);
+
+  // Simulate typing indicator when waiting for AI response
+  useEffect(() => {
+    if (messages.length === 0) return;
+    const lastMsg = messages[messages.length - 1];
+    if (lastMsg.sender === 'client') {
+      setIsTyping(true);
+    } else {
+      setIsTyping(false);
+    }
   }, [messages]);
 
   const handleSend = () => {
     const trimmed = input.trim();
-    if (!trimmed) return;
-    sendMessage(trimmed);
+    if (!trimmed && !attachedFile) return;
+    const messageText = attachedFile
+      ? `${trimmed ? trimmed + '\n' : ''}[Attached: ${attachedFile.name}]`
+      : trimmed;
+    sendMessage(messageText);
     setInput('');
+    setAttachedFile(null);
+    textInputRef.current?.focus();
+  };
+
+  const handleFileChange = (e) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setAttachedFile(file);
+      textInputRef.current?.focus();
+    }
+    e.target.value = '';
+  };
+
+  const isConsecutive = (i) => {
+    if (i === 0) return false;
+    return messages[i].sender === messages[i - 1].sender;
   };
 
   return (
-    <div
-      ref={containerRef}
-      className={`min-h-screen bg-ember-base flex flex-col ${crisisActive ? 'animate-pulse-crisis' : ''}`}
-    >
-      {/* Header */}
-      <div className="frost-panel px-6 py-4 flex items-center justify-between border-b border-ember-text/5">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-lg ember-gradient flex items-center justify-center">
-            <Sparkles className="w-4 h-4 text-ember-text" />
+    <div className="min-h-screen bg-ember-base flex items-center justify-center p-6">
+      <div
+        ref={containerRef}
+        className={`w-full max-w-2xl h-[85vh] flex flex-col rounded-2xl border overflow-hidden shadow-2xl shadow-black/50 ${
+          crisisActive ? 'animate-pulse-crisis border-ember-crisis/30' : 'border-ember-text/8'
+        }`}
+        style={{ background: 'rgba(26, 22, 20, 0.97)' }}
+      >
+        {/* Header */}
+        <div className="px-6 py-4 flex items-center justify-between border-b border-ember-text/8" style={{ background: 'rgba(42, 36, 33, 0.8)' }}>
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl ember-gradient flex items-center justify-center shadow-lg shadow-ember-primary/20">
+              <Sparkles className="w-5 h-5 text-ember-text" />
+            </div>
+            <div>
+              <h1 className="font-heading text-ember-text text-lg leading-tight">60 Watts of Intelligence</h1>
+              <div className="flex items-center gap-1.5 mt-0.5">
+                <div className={`w-2 h-2 rounded-full ${connected ? 'bg-ember-safe animate-pulse' : 'bg-ember-muted'}`} />
+                <span className="text-[13px] font-mono text-ember-muted">
+                  {connected ? 'Online' : 'Connecting...'}
+                </span>
+              </div>
+            </div>
           </div>
-          <div>
-            <h1 className="font-heading text-ember-text text-lg leading-tight">60 Watts of Intelligence</h1>
-            <div className="flex items-center gap-1.5">
-              <div className={`w-1.5 h-1.5 rounded-full ${connected ? 'bg-ember-safe' : 'bg-ember-muted'}`} />
-              <span className="text-[10px] font-mono text-ember-muted">
-                {connected ? 'Connected' : 'Connecting...'}
-              </span>
+          <div className="flex items-center gap-2">
+            {crisisActive && (
+              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-ember-crisis/20 border border-ember-crisis/30">
+                <AlertTriangle className="w-3.5 h-3.5 text-ember-crisis" />
+                <span className="text-xs text-ember-crisis font-mono">Crisis Protocol</span>
+              </div>
+            )}
+            <div className="flex items-center gap-1 px-2.5 py-1 rounded-full bg-ember-surface border border-ember-text/5">
+              <Bot className="w-3.5 h-3.5 text-ember-muted" />
+              <span className="text-[13px] font-mono text-ember-muted">AI</span>
             </div>
           </div>
         </div>
-        {crisisActive && (
-          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-ember-crisis/20 border border-ember-crisis/30">
-            <AlertTriangle className="w-3.5 h-3.5 text-ember-crisis" />
-            <span className="text-xs text-ember-crisis font-mono">Crisis Protocol Active</span>
-          </div>
-        )}
-      </div>
 
-      <SafetyBanner crisisActive={crisisActive} />
+        <SafetyBanner crisisActive={crisisActive} />
 
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-4 py-6 max-w-2xl w-full mx-auto">
-        <div className="space-y-4">
+        {/* Messages */}
+        <div className="flex-1 overflow-y-auto px-5 py-4">
           {messages.length === 0 && (
-            <div className="text-center mt-16">
-              <div className="w-12 h-12 rounded-full bg-ember-primary/10 mx-auto mb-4 flex items-center justify-center">
-                <Sparkles className="w-5 h-5 text-ember-primary" />
+            <div className="text-center mt-12">
+              <div className="w-16 h-16 rounded-2xl ember-gradient mx-auto mb-5 flex items-center justify-center shadow-lg shadow-ember-primary/20">
+                <Sparkles className="w-7 h-7 text-ember-text" />
               </div>
-              <p className="text-ember-text text-sm font-medium mb-1">Hey! Ready to study?</p>
-              <p className="text-ember-muted text-xs mb-4">Ask me anything — homework, test prep, or just curious questions.</p>
+              <h2 className="text-ember-text text-lg font-heading mb-2">Hey! Ready to study?</h2>
+              <p className="text-ember-muted text-sm mb-6 max-w-sm mx-auto">
+                Ask me anything — homework help, test prep, or just curious questions. I am here for you.
+              </p>
               <div className="flex flex-wrap gap-2 justify-center">
-                <button
-                  onClick={() => sendMessage('Help me with my math homework')}
-                  className="text-[11px] font-mono text-ember-muted bg-ember-surface px-3 py-1.5 rounded-full border border-ember-text/10 hover:border-ember-primary/30 hover:text-ember-text transition-colors"
-                >
-                  Help with math
-                </button>
-                <button
-                  onClick={() => sendMessage('Explain photosynthesis')}
-                  className="text-[11px] font-mono text-ember-muted bg-ember-surface px-3 py-1.5 rounded-full border border-ember-text/10 hover:border-ember-primary/30 hover:text-ember-text transition-colors"
-                >
-                  Explain photosynthesis
-                </button>
-                <button
-                  onClick={() => sendMessage('Help me write an essay outline')}
-                  className="text-[11px] font-mono text-ember-muted bg-ember-surface px-3 py-1.5 rounded-full border border-ember-text/10 hover:border-ember-primary/30 hover:text-ember-text transition-colors"
-                >
-                  Essay outline
-                </button>
+                {[
+                  { label: 'Help with math', msg: 'Help me with my math homework' },
+                  { label: 'Explain photosynthesis', msg: 'Explain photosynthesis' },
+                  { label: 'Essay outline', msg: 'Help me write an essay outline' },
+                  { label: 'Quiz me', msg: 'Quiz me on my vocabulary words' },
+                ].map((item) => (
+                  <button
+                    key={item.label}
+                    onClick={() => sendMessage(item.msg)}
+                    className="text-[13px] font-mono text-ember-muted bg-ember-surface px-4 py-2 rounded-xl border border-ember-text/10 hover:border-ember-primary/30 hover:text-ember-text hover:bg-ember-surface/80 transition-all"
+                  >
+                    {item.label}
+                  </button>
+                ))}
               </div>
             </div>
           )}
+
           {messages.map((msg, i) => (
-            <MessageBubble key={msg.id || i} sender={msg.sender} content={msg.content} index={i} />
+            <MessageBubble
+              key={msg.id || i}
+              sender={msg.sender}
+              content={msg.content}
+              index={i}
+              isConsecutive={isConsecutive(i)}
+            />
           ))}
+
+          {isTyping && <TypingIndicator />}
+
           <div ref={bottomRef} />
         </div>
-      </div>
 
-      {/* Input */}
-      <div className="frost-panel px-4 py-4 border-t border-ember-text/5">
-        <div className="max-w-2xl mx-auto flex gap-3">
-          <input
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-            placeholder="Ask me anything..."
-            className="flex-1 bg-ember-surface text-ember-text text-sm rounded-xl px-4 py-3 border border-ember-text/10 placeholder:text-ember-muted/60 focus:outline-none focus:ring-1 focus:ring-ember-primary/50"
-          />
-          <button
-            onClick={handleSend}
-            disabled={!input.trim()}
-            className="ember-gradient rounded-xl px-4 py-3 text-ember-text disabled:opacity-30 transition-all ember-glow"
-            aria-label="Send message"
-          >
-            <Send className="w-4 h-4" />
-          </button>
+        {/* Input area */}
+        <div className="border-t border-ember-text/8 px-5 py-4" style={{ background: 'rgba(42, 36, 33, 0.6)' }}>
+          {/* File preview */}
+          {attachedFile && (
+            <div className="mb-3">
+              <FilePreview file={attachedFile} onRemove={() => setAttachedFile(null)} />
+            </div>
+          )}
+
+          {/* Input row */}
+          <div className="flex items-end gap-2">
+            {/* Attachment buttons */}
+            <div className="flex gap-1 pb-1">
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="w-9 h-9 rounded-xl flex items-center justify-center text-ember-muted hover:text-ember-primary hover:bg-ember-surface transition-all"
+                aria-label="Attach file"
+                title="Attach file"
+              >
+                <Paperclip className="w-[18px] h-[18px]" />
+              </button>
+              <button
+                onClick={() => {
+                  fileInputRef.current.accept = 'image/*';
+                  fileInputRef.current?.click();
+                  fileInputRef.current.accept = '*/*';
+                }}
+                className="w-9 h-9 rounded-xl flex items-center justify-center text-ember-muted hover:text-ember-primary hover:bg-ember-surface transition-all"
+                aria-label="Upload image"
+                title="Upload image for Profe to analyze"
+              >
+                <Image className="w-[18px] h-[18px]" />
+              </button>
+            </div>
+
+            {/* Hidden file input */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="*/*"
+              onChange={handleFileChange}
+              className="hidden"
+            />
+
+            {/* Text input */}
+            <div className="flex-1 relative">
+              <input
+                ref={textInputRef}
+                type="text"
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleSend()}
+                placeholder="Type a message..."
+                className="w-full bg-ember-surface text-ember-text text-sm rounded-xl px-4 py-3 border border-ember-text/8 placeholder:text-ember-subtle focus:outline-none focus:ring-2 focus:ring-ember-primary/30 focus:border-ember-primary/20 transition-all"
+              />
+            </div>
+
+            {/* Send button */}
+            <button
+              onClick={handleSend}
+              disabled={!input.trim() && !attachedFile}
+              className="w-10 h-10 ember-gradient rounded-xl flex items-center justify-center text-ember-text disabled:opacity-20 transition-all ember-glow shadow-lg shadow-ember-primary/10 disabled:shadow-none"
+              aria-label="Send message"
+            >
+              <Send className="w-[18px] h-[18px]" />
+            </button>
+          </div>
+
+          {/* Footer */}
+          <p className="text-center text-ember-subtle text-[13px] font-mono mt-3">
+            Type <span className="text-ember-subtle">@profe</span> to talk to Profe &middot; 988 or 911 for emergencies
+          </p>
         </div>
-        <p className="text-center text-ember-muted/40 text-[10px] font-mono mt-3">
-          Type <span className="text-ember-muted/60">@profe</span> to talk to Profe &middot; 988 or 911 for emergencies
-        </p>
       </div>
     </div>
   );

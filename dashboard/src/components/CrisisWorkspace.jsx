@@ -49,7 +49,7 @@ export default function CrisisWorkspace({
         </button>
         <div className="flex-1">
           <span className="text-sm font-heading text-ember-text">Crisis Workspace</span>
-          <span className="text-[10px] font-mono text-ember-muted ml-2">
+          <span className="text-[13px] font-mono text-ember-muted ml-2">
             {(session.id || session.sessionId || '').substring(0, 8)}
           </span>
         </div>
@@ -146,7 +146,7 @@ export default function CrisisWorkspace({
               if (msg.sender === 'system') {
                 return (
                   <div key={i} className="py-1">
-                    <div className="frost-panel rounded-full px-3 py-1 text-[10px] font-mono text-ember-muted mx-auto w-fit">
+                    <div className="frost-panel rounded-full px-3 py-1 text-[13px] font-mono text-ember-muted mx-auto w-fit">
                       {msg.content}
                     </div>
                   </div>
@@ -156,7 +156,7 @@ export default function CrisisWorkspace({
               return (
                 <div key={i} className={`rounded-xl px-3 py-2 text-xs text-ember-text ${senderStyles[msg.sender] || 'frost-panel'}`}>
                   {senderLabels[msg.sender] && (
-                    <span className="text-[10px] font-mono text-ember-muted block mb-0.5">{senderLabels[msg.sender]}</span>
+                    <span className="text-[13px] font-mono text-ember-muted block mb-0.5">{senderLabels[msg.sender]}</span>
                   )}
                   {msg.content}
                 </div>
@@ -175,7 +175,7 @@ export default function CrisisWorkspace({
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && handleSend()}
                   placeholder="Type as Jason..."
-                  className="flex-1 bg-ember-surface text-ember-text text-xs rounded-lg px-3 py-2 border border-ember-text/10 placeholder:text-ember-muted/60 focus:outline-none focus:ring-1 focus:ring-ember-primary/50"
+                  className="flex-1 bg-ember-surface text-ember-text text-xs rounded-lg px-3 py-2 border border-ember-text/10 placeholder:text-ember-subtle focus:outline-none focus:ring-1 focus:ring-ember-primary/50"
                 />
                 <button
                   onClick={handleSend}

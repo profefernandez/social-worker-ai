@@ -48,7 +48,7 @@ export default function AuditPage({ token }) {
               key={entry.id}
               className="frost-panel rounded-lg px-4 py-3 flex items-start gap-4"
             >
-              <span className="text-[10px] font-mono text-ember-muted whitespace-nowrap mt-1">
+              <span className="text-[13px] font-mono text-ember-muted whitespace-nowrap mt-1">
                 {new Date(entry.created_at).toLocaleString()}
               </span>
               <code className="text-xs text-ember-primary font-mono mt-1">

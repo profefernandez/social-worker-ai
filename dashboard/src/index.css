@@ -9,6 +9,10 @@
     box-sizing: border-box;
   }
 
+  html {
+    font-size: 19px;
+  }
+
   body {
     margin: 0;
     font-family: 'Space Grotesk', system-ui, sans-serif;

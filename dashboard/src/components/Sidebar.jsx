@@ -18,7 +18,7 @@ export default function Sidebar({ page, onNavigate, user, onLogout }) {
             <span className="text-ember-text font-heading text-sm block leading-tight">
               Crisis Monitor
             </span>
-            <span className="text-ember-muted text-[10px] font-mono">60 Watts of Clarity</span>
+            <span className="text-ember-muted text-[13px] font-mono">60 Watts of Clarity</span>
           </div>
         </div>
       </div>

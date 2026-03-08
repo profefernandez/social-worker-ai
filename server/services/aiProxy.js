@@ -16,17 +16,20 @@ const PROVIDERS = {
     authHeader: (apiKey) => ({ Authorization: `Bearer ${apiKey}` }),
   },
   mistral: {
-    url: 'https://api.mistral.ai/v1/chat/completions',
+    url: 'https://api.mistral.ai/v1/conversations',
     formatRequest: (input, conversationHistory, config) => ({
-      model: config.model || 'mistral-small-latest',
-      messages: [
-        ...(config.systemPrompt ? [{ role: 'system', content: config.systemPrompt }] : []),
+      agent_id: config.agentId || process.env.MISTRAL_AGENT_ID,
+      inputs: [
         ...conversationHistory,
         { role: 'user', content: input },
       ],
-      max_tokens: 1024,
     }),
-    parseResponse: (data) => data.choices?.[0]?.message?.content || '',
+    parseResponse: (data) => {
+      // Conversations API returns outputs array with assistant messages
+      const outputs = data.outputs || [];
+      const assistantMsg = outputs.find((o) => o.role === 'assistant');
+      return assistantMsg?.content || '';
+    },
     authHeader: (apiKey) => ({ Authorization: `Bearer ${apiKey}` }),
   },
 };
