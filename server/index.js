@@ -12,7 +12,7 @@ const { Server } = require('socket.io');
 const helmet = require('helmet');
 const cors = require('cors');
 
-const { testConnection } = require('./config/db');
+const { testConnection, pool } = require('./config/db');
 const { apiLimiter } = require('./middleware/rateLimiter');
 const authRoutes = require('./routes/auth');
 const chatRoutes = require('./routes/chat');
@@ -49,6 +49,30 @@ app.use(express.urlencoded({ extended: false, limit: '100kb' }));
 
 // Rate limiting on all API routes
 app.use('/api', apiLimiter);
+
+// Demo mode — create a session without auth (for prototype only)
+if (process.env.DEMO_MODE === 'true') {
+  app.post('/api/demo/session', async (req, res) => {
+    try {
+      const { v4: uuidv4 } = require('uuid');
+      const sessionId = uuidv4();
+
+      // Use demo user ID (create a demo user in DB or use ID 1)
+      const demoUserId = parseInt(process.env.DEMO_USER_ID, 10) || 1;
+
+      await pool.execute(
+        'INSERT INTO sessions (id, user_id, client_identifier) VALUES (?, ?, ?)',
+        [sessionId, demoUserId, 'demo-judge']
+      );
+
+      res.json({ sessionId });
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('Demo session creation failed:', err.message);
+      res.status(500).json({ error: 'Failed to create demo session' });
+    }
+  });
+}
 
 // Health check (no auth)
 app.get('/health', (req, res) => {
