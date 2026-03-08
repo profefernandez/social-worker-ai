@@ -110,11 +110,20 @@ function TypingIndicator() {
 
 function FilePreview({ file, onRemove }) {
   const isImage = file.type?.startsWith('image/');
+  const [previewUrl, setPreviewUrl] = useState(null);
+
+  useEffect(() => {
+    if (!isImage) return;
+    const url = URL.createObjectURL(file);
+    setPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [file, isImage]);
+
   return (
     <div className="relative inline-flex items-center gap-2 frost-panel rounded-lg border border-ember-text/10 px-3 py-2 text-xs text-ember-muted">
-      {isImage ? (
+      {isImage && previewUrl ? (
         <img
-          src={URL.createObjectURL(file)}
+          src={previewUrl}
           alt={file.name}
           className="w-10 h-10 rounded object-cover"
         />
